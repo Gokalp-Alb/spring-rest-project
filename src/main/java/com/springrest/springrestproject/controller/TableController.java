@@ -5,18 +5,17 @@ import com.springrest.springrestproject.core.response.ResponseOperation;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
-import com.springrest.springrestproject.model.TableMetadata;
-import com.springrest.springrestproject.repository.ITableMetadataRepo;
 import com.springrest.springrestproject.security.CustomUserDetails;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
-import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/tables")
@@ -36,9 +35,12 @@ public class TableController {
 
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
-    public ApiResponse<List<TableMetadata>> getAllTables(
-            @AuthenticationPrincipal CustomUserDetails userDetails) {
-        List<TableMetadata> tables = metadataService.getAllTables(userDetails.getId());
+    public ApiResponse<Page<TableResponse>> getAllTables(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @RequestParam(name = "page", required = false, defaultValue = "0") int page,
+            @RequestParam(name = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        Pageable pageable = PageRequest.of(page, pageSize);
+        Page<TableResponse> tables = metadataService.getAllTables(pageable);
         return ApiResponse.success(HttpStatus.OK.value(), ResponseOperation.READ, tables);
     }
 

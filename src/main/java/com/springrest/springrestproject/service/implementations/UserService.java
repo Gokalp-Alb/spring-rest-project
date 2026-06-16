@@ -1,14 +1,16 @@
 package com.springrest.springrestproject.service.implementations;
 
+import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.AppUser;
-import com.springrest.springrestproject.repository.IUserRepo; // Using IUserRepo exclusively
+import com.springrest.springrestproject.repository.IUserRepo;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -19,15 +21,10 @@ public class UserService implements IUserService {
 
     @Override
     @Transactional
-    public UserResponse createUser(AppUser user) {
-        // 1. Securely encrypt the real password
+    public UserRequest createUser(AppUser user) {
         user.setPassword(passwordEncoder.encode(user.getPassword()));
-
-        // 2. Commit the clean entity safely to PostgreSQL
         AppUser savedUser = userRepo.save(user);
-
-        // 3. Return a decoupled response record with masked asterisks
-        return new UserResponse(
+        return new UserRequest(
                 savedUser.getId(),
                 savedUser.getUsername(),
                 savedUser.getRole(),
@@ -37,9 +34,7 @@ public class UserService implements IUserService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<AppUser> getAllUsers() {
-        List<AppUser> users = userRepo.findAll();
-        users.forEach(user -> user.setPassword("********"));
-        return users;
+    public Page<UserResponse> getAllUsers(Pageable pageable) {
+        return userRepo.findAllProjectedBy(pageable);
     }
 }

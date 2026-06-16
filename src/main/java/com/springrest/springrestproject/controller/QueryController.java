@@ -6,6 +6,8 @@ import com.springrest.springrestproject.dto.request.query.SelectQueryRequest;
 import com.springrest.springrestproject.security.CustomUserDetails;
 import com.springrest.springrestproject.service.interfaces.IQueryService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -23,8 +25,11 @@ public class QueryController {
     @ResponseStatus(HttpStatus.OK)
     public ApiResponse<List<Map<String, Object>>> select(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @RequestBody SelectQueryRequest request) {
-        List<Map<String, Object>> results = queryService.executeSelect(request, userDetails.getId());
+            @RequestBody SelectQueryRequest request,
+            @RequestParam(name = "page", required = false, defaultValue = "0") int page,
+            @RequestParam(name = "pageSize", required = false, defaultValue = "10") int pageSize) {
+        Pageable pageable = PageRequest.of(page, pageSize);
+        List<Map<String, Object>> results = queryService.executeSelect(request, userDetails.getId(), pageable);
         return ApiResponse.success(HttpStatus.OK.value(), ResponseOperation.EXECUTE, results);
     }
 }

@@ -1,10 +1,12 @@
 package com.springrest.springrestproject.service.interfaces;
 
+import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.AppUser;
-import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 public interface IUserService {
-    UserResponse createUser(AppUser user);
-    List<AppUser> getAllUsers();
+    UserRequest createUser(AppUser user);
+    Page<UserResponse> getAllUsers(Pageable pageable);
 }

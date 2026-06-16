@@ -1,17 +1,20 @@
 package com.springrest.springrestproject.service.implementations;
 
+import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
+import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.model.AppUser;
 import com.springrest.springrestproject.model.TableMetadata;
 import com.springrest.springrestproject.repository.ITableMetadataRepo;
 import com.springrest.springrestproject.repository.IUserRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
@@ -21,12 +24,14 @@ public class MetadataService implements IMetadataService {
     private final ITableMetadataRepo tableMetadataRepo;
     private final IUserRepo userRepo;
     private final JdbcTemplate jdbcTemplate;
+    private final TableMapper tableMapper;
 
     @Override
     @Transactional
     public TableMetadata createTable(TableCreateRequest request, Long userId) {
         AppUser user = userRepo.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+        //TODO only pull the tables created by this user
 
         String columnsSql = request.columns().stream()
                 .map(col -> col.getColumnName() + " " + col.getDataType())
@@ -44,9 +49,9 @@ public class MetadataService implements IMetadataService {
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public List<TableMetadata> getAllTables(Long userId) {
-        return tableMetadataRepo.findAll();
+    public Page<TableResponse> getAllTables(Pageable pageable) {
+        Page<TableMetadata> metadataPage = tableMetadataRepo.findAll(pageable);
+        return metadataPage.map(tableMapper::toResponse);
     }
 
     @Override
