@@ -1,8 +1,11 @@
 package com.springrest.springrestproject.service.implementations;
 
+import com.springrest.springrestproject.core.exception.ApplicationException;
+import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
+import com.springrest.springrestproject.model.AdminSecurityContext;
 import com.springrest.springrestproject.model.AppUser;
 import com.springrest.springrestproject.model.TableMetadata;
 import com.springrest.springrestproject.repository.ITableMetadataRepo;
@@ -28,7 +31,7 @@ public class MetadataService implements IMetadataService {
 
     @Override
     @Transactional
-    public TableMetadata createTable(TableCreateRequest request, Long userId) {
+    public TableMetadata createTable(String tableName, TableCreateRequest request, Long userId) {
         AppUser user = userRepo.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         //TODO only pull the tables created by this user
@@ -36,15 +39,20 @@ public class MetadataService implements IMetadataService {
         String columnsSql = request.columns().stream()
                 .map(col -> col.getColumnName() + " " + col.getDataType())
                 .collect(Collectors.joining(", "));
-
         String createTableSql = String.format("CREATE TABLE IF NOT EXISTS %s (id SERIAL PRIMARY KEY, %s);",
-                request.tableName(), columnsSql);
-
+                tableName, columnsSql);
         jdbcTemplate.execute(createTableSql);
 
+        AdminSecurityContext securityContext = new AdminSecurityContext();
+        securityContext.setCreatorId(userId);
+        securityContext.setLastUpdaterId(userId);
+        securityContext.setIsSensitive(request.isSensitive() != null && request.isSensitive());
+
         TableMetadata metadata = new TableMetadata();
-        metadata.setTableName(request.tableName());
+        metadata.setTableName(tableName);
         metadata.setColumns(request.columns());
+        metadata.setAdminContext(securityContext);
+
         return tableMetadataRepo.save(metadata);
     }
 
@@ -55,10 +63,17 @@ public class MetadataService implements IMetadataService {
     }
 
     @Override
+    public TableResponse getTableById(Long tableId) {
+        TableMetadata metadata = tableMetadataRepo.findById(tableId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+        return tableMapper.toResponse(metadata);
+    }
+
+    @Override
     @Transactional
     public void deleteTableByName(String tableName, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new RuntimeException("Table metadata record not found for: " + tableName));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         String dropTableSql = String.format("DROP TABLE IF EXISTS %s;", tableName);
         jdbcTemplate.execute(dropTableSql);
         tableMetadataRepo.delete(metadata);

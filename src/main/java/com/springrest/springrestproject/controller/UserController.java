@@ -1,7 +1,6 @@
 package com.springrest.springrestproject.controller;
 
 import com.springrest.springrestproject.core.response.ApiResponse;
-import com.springrest.springrestproject.core.response.ResponseOperation;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.AppUser;
@@ -24,7 +23,7 @@ public class UserController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<UserRequest> createUser(@RequestBody AppUser user) {
         UserRequest savedUser = userService.createUser(user);
-        return ApiResponse.success(HttpStatus.CREATED.value(), ResponseOperation.valueOf("CREATE"), savedUser);
+        return ApiResponse.success(HttpStatus.CREATED.value(), savedUser);
     }
 
     @GetMapping
@@ -34,6 +33,6 @@ public class UserController {
             @RequestParam(name = "pageSize", required = false, defaultValue = "10") int pageSize) {
         Pageable pageable = PageRequest.of(page, pageSize);
         Page<UserResponse> users = userService.getAllUsers(pageable);
-        return ApiResponse.success(HttpStatus.OK.value(), ResponseOperation.valueOf("READ"), users);
+        return ApiResponse.success(HttpStatus.OK.value(), users);
     }
 }

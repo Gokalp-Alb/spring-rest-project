@@ -18,4 +18,7 @@ public class TableMetadata {
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "column_metadata", joinColumns = @JoinColumn(name = "table_id"))
     private List<ColumnMetadata> columns;
+
+    @Embedded
+    private AdminSecurityContext adminContext;
 }

@@ -8,7 +8,8 @@ import org.springframework.data.domain.Pageable;
 
 
 public interface IMetadataService {
-    TableMetadata createTable(TableCreateRequest request, Long userId);
+    TableMetadata createTable(String tablename, TableCreateRequest request, Long userId);
     Page<TableResponse> getAllTables(Pageable pageable);
+    TableResponse getTableById(Long tableId);
     void deleteTableByName(String tableName, Long userId);
 }

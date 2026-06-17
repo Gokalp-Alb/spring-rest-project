@@ -1,7 +1,6 @@
 package com.springrest.springrestproject.controller;
 
 import com.springrest.springrestproject.core.response.ApiResponse;
-import com.springrest.springrestproject.core.response.ResponseOperation;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
@@ -26,22 +25,30 @@ public class TableController {
     private final TableMapper tableMapper;
 
 
-    @PostMapping
+    @PostMapping("/{tableName}")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<TableResponse> createTable(@Valid @RequestBody TableCreateRequest request, @AuthenticationPrincipal CustomUserDetails userDetails) {
-        TableResponse response = tableMapper.toResponse(metadataService.createTable(request, userDetails.getId()));
-        return ApiResponse.success(HttpStatus.CREATED.value(), ResponseOperation.CREATE, response);
+    public ApiResponse<TableResponse> createTable(@Valid @RequestBody TableCreateRequest request,
+                                                  @AuthenticationPrincipal CustomUserDetails userDetails,
+                                                  @PathVariable String tableName) {
+        TableResponse response = tableMapper.toResponse(metadataService.createTable(tableName, request, userDetails.getId()));
+        return ApiResponse.success(HttpStatus.CREATED.value(), response);
     }
 
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
     public ApiResponse<Page<TableResponse>> getAllTables(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
             @RequestParam(name = "page", required = false, defaultValue = "0") int page,
             @RequestParam(name = "pageSize", required = false, defaultValue = "10") int pageSize) {
         Pageable pageable = PageRequest.of(page, pageSize);
         Page<TableResponse> tables = metadataService.getAllTables(pageable);
-        return ApiResponse.success(HttpStatus.OK.value(), ResponseOperation.READ, tables);
+        return ApiResponse.success(HttpStatus.OK.value(), tables);
+    }
+
+    @GetMapping("/{tableId}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<TableResponse> getById(@PathVariable Long tableId) {
+        TableResponse table = metadataService.getTableById(tableId);
+        return ApiResponse.success(HttpStatus.OK.value(), table);
     }
 
     @DeleteMapping("/{tableName}")
@@ -50,6 +57,6 @@ public class TableController {
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable String tableName) {
         metadataService.deleteTableByName(tableName, userDetails.getId());
-        return ApiResponse.success(HttpStatus.OK.value(), ResponseOperation.DELETE, null);
+        return ApiResponse.success(HttpStatus.OK.value(), null);
     }
 }
