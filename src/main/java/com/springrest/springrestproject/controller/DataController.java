@@ -42,8 +42,8 @@ public class DataController {
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @RequestBody SelectQueryRequest request,
             @RequestParam(name = "page", required = false, defaultValue = "0") int page,
-            @RequestParam(name = "pageSize", required = false, defaultValue = "10") int pageSize) {
-        Pageable pageable = PageRequest.of(page, pageSize);
+            @RequestParam(name = "size", required = false, defaultValue = "10") int size) {
+        Pageable pageable = PageRequest.of(page, size);
         List<Map<String, Object>> results = dataService.executeSelect(request, userDetails.getId(), pageable);
         return ApiResponse.success(HttpStatus.OK.value(), results);
     }
@@ -58,5 +58,38 @@ public class DataController {
         Page<Map<String, Object>> paginatedData = dataService.getTableData(
                 tableName, showSensitive, pageable, userDetails.getId());
         return ApiResponse.success(HttpStatus.OK.value(), paginatedData);
+    }
+
+    @DeleteMapping("/data/{tableName}/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> deleteRow(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable String tableName,
+            @PathVariable Long id) {
+        dataService.deleteRowById(tableName, id, userDetails.getId());
+        return ApiResponse.success(HttpStatus.OK.value(), null);
+    }
+
+    @PutMapping("/data/{tableName}/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> updateRow(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable String tableName,
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> updateData) {
+        dataService.updateRowById(tableName, id, updateData, userDetails.getId());
+        return ApiResponse.success(HttpStatus.OK.value(), null);
+    }
+
+    @GetMapping("/data/{tableName}/{id}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Map<String, Object>> getSingleRowData(
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @PathVariable String tableName,
+            @PathVariable Long id,
+            @RequestParam(name = "show_sensitive", required = false) Boolean showSensitive) {
+        Map<String, Object> rowData = dataService.findRowById(
+                tableName, id, showSensitive, userDetails.getId());
+        return ApiResponse.success(HttpStatus.OK.value(), rowData);
     }
 }

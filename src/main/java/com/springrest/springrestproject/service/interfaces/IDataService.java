@@ -12,4 +12,7 @@ public interface IDataService{
     void insertRow(TableInsertRequest request, Long userId);
     List<Map<String, Object>> executeSelect(SelectQueryRequest request, Long userId, Pageable pageable);
     Page<Map<String, Object>> getTableData(String tableName, Boolean showSensitive, Pageable pageable, Long userId);
+    void deleteRowById(String tableName, Long id, Long userId);
+    void updateRowById(String tableName, Long id, Map<String, Object> updateData, Long userId);
+    Map<String, Object> findRowById(String tableName, Long id, Boolean showSensitive, Long userId);
 }
