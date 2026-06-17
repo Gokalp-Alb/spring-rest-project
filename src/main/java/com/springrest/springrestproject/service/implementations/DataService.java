@@ -4,7 +4,6 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.SelectQueryRequest;
-import com.springrest.springrestproject.model.ColumnMetadata;
 import com.springrest.springrestproject.model.TableMetadata;
 import com.springrest.springrestproject.repository.ITableMetadataRepo;
 import com.springrest.springrestproject.repository.IUserRepo;
