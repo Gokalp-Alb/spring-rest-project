@@ -15,6 +15,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+
 @Service
 @RequiredArgsConstructor
 public class UserService implements IUserService {
@@ -65,11 +66,11 @@ public class UserService implements IUserService {
     @Override
     @Transactional
     public void deleteUserById(Long id, Long userId) {
-        if (!userRepo.existsById(id)) {
-            throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
-        }
-        String simulatedSql = String.format("DELETE FROM app_user WHERE id = %d;", id);
-        metadataService.logSchemaChange("app_user", simulatedSql, userId);
-        userRepo.deleteById(id);
+        AppUser user = userRepo.findById(id)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+        user.setActive(false);
+        String simulatedSql = String.format("UPDATE app_users SET active = false WHERE id = %d;", id);
+        metadataService.logSchemaChange("app_users", simulatedSql, userId);
+        userRepo.save(user);
     }
 }

@@ -9,6 +9,7 @@ import com.springrest.springrestproject.repository.ITableMetadataRepo;
 import com.springrest.springrestproject.repository.IUserRepo;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
+import com.springrest.springrestproject.service.implementations.Kafka.OutboundKafkaPublisher;
 import com.springrest.springrestproject.util.DataEvaluationHelper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -18,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -31,6 +33,7 @@ public class DataService implements IDataService {
     private final IUserRepo userRepo;
     private final IMetadataService metadataService;
     private final DataEvaluationHelper dataHelper;
+    private final OutboundKafkaPublisher kafkaPublisher;
 
     @Override
     @Transactional
@@ -54,8 +57,11 @@ public class DataService implements IDataService {
         String insertSql = String.format("INSERT INTO %s (%s) VALUES (%s);",
                 request.tableName(), columnsSql, placeholdersSql);
 
-        metadataService.logSchemaChange(request.tableName(), insertSql, userId);
+        String logSql = dataHelper.rebuildFullSql(insertSql, values);
+
+        metadataService.logSchemaChange(request.tableName(), logSql, userId);
         jdbcTemplate.update(insertSql, values.toArray());
+        kafkaPublisher.publishMutation(request.tableName(), "INSERT", request.rowData(), userId);
     }
 
     @Override
@@ -116,6 +122,7 @@ public class DataService implements IDataService {
         metadataService.logSchemaChange(tableName, fullSqlForLog, userId);
 
         int rowsAffected = jdbcTemplate.update(deleteSql, id);
+        kafkaPublisher.publishMutation(tableName, "DELETE", Map.of("id", id), userId);
         if (rowsAffected == 0) {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -150,6 +157,10 @@ public class DataService implements IDataService {
         metadataService.logSchemaChange(tableName, fullSqlForLog, userId);
 
         int rowsAffected = jdbcTemplate.update(updateSql, values.toArray());
+        Map<String, Object> fullPayload = new HashMap<>(updateData);
+        fullPayload.put("id", id);
+        kafkaPublisher.publishMutation(tableName, "UPDATE", fullPayload, userId);
+
         if (rowsAffected == 0) {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
         }

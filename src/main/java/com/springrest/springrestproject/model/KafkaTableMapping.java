@@ -4,23 +4,23 @@ import jakarta.persistence.*;
 import lombok.*;
 
 @Entity
-@Table(name = "app_users")
+@Table(name = "kafka_table_mappings")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor
-public class AppUser {
+@Builder
+public class KafkaTableMapping {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true, nullable = false)
-    private String username;
+    @Column(nullable = false)
+    private String tableName;
 
     @Column(nullable = false)
-    private String password;
+    private String kafkaTopic;
 
-    @Enumerated(EnumType.STRING)
-    private Role role;
+    @Column(nullable = false)
+    private String direction;
 
     @Column(nullable = false)
     private boolean active = true;
-    
 }
