@@ -53,10 +53,10 @@ public class TableController {
 
     @DeleteMapping("/{tableName}")
     @ResponseStatus(HttpStatus.OK)
-    public ApiResponse<Void> deleteTable(
+    public ApiResponse<TableResponse> deleteTable(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable String tableName) {
-        metadataService.deleteTableByName(tableName, userDetails.getId());
-        return ApiResponse.success(HttpStatus.OK.value(), null);
+        TableResponse tr = metadataService.deleteTableByName(tableName, userDetails.getId());
+        return ApiResponse.success(HttpStatus.OK.value(), tr);
     }
 }

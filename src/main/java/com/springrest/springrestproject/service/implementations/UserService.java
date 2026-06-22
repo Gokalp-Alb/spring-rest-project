@@ -28,9 +28,10 @@ public class UserService implements IUserService {
     @Transactional
     public UserRequest createUser(AppUser user, Long userId) {
         user.setPassword(passwordEncoder.encode(user.getPassword()));
+        user.setActive(true);
         AppUser savedUser = userRepo.save(user);
         String simulatedSql = String.format(
-                "INSERT INTO app_user (id, username, role) VALUES (%d, '%s', '%s');",
+                "INSERT INTO app_user (id, username, role, active) VALUES (%d, '%s', '%s', true);",
                 savedUser.getId(),
                 savedUser.getUsername(),
                 savedUser.getRole().name()
@@ -68,6 +69,9 @@ public class UserService implements IUserService {
     public void deleteUserById(Long id, Long userId) {
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+        if(!user.getActive()){
+            throw new ApplicationException(ErrorCode.ALREADY_DELETED);
+        }
         user.setActive(false);
         String simulatedSql = String.format("UPDATE app_users SET active = false WHERE id = %d;", id);
         metadataService.logSchemaChange("app_users", simulatedSql, userId);

@@ -11,6 +11,6 @@ public interface IMetadataService {
     TableMetadata createTable(String tablename, TableCreateRequest request, Long userId);
     Page<TableResponse> getAllTables(Pageable pageable);
     TableResponse getTableById(Long tableId);
-    void deleteTableByName(String tableName, Long userId);
+    TableResponse deleteTableByName(String tableName, Long userId);
     void logSchemaChange(String tableName, String sql, Long userId);
 }

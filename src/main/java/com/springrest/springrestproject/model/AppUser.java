@@ -21,6 +21,6 @@ public class AppUser {
     private Role role;
 
     @Column(nullable = false)
-    private boolean active = true;
+    private Boolean active = true;
     
 }

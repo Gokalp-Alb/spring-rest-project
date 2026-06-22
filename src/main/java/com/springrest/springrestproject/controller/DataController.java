@@ -3,6 +3,7 @@ package com.springrest.springrestproject.controller;
 import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.SelectQueryRequest;
+import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.security.CustomUserDetails;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import jakarta.validation.Valid;
@@ -27,13 +28,13 @@ public class DataController {
 
     @PostMapping("/data/insert")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<Void> insert(
+    public ApiResponse<DataResponse> insert(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @Valid @RequestBody TableInsertRequest request) {
 
-        dataService.insertRow(request, userDetails.getId());
+        DataResponse dataResponse = dataService.insertRow(request, userDetails.getId());
 
-        return ApiResponse.success(HttpStatus.CREATED.value(), null);
+        return ApiResponse.success(HttpStatus.CREATED.value(), dataResponse);
     }
 
     @PostMapping("/queries/select")
@@ -62,23 +63,23 @@ public class DataController {
 
     @DeleteMapping("/data/{tableName}/{id}")
     @ResponseStatus(HttpStatus.OK)
-    public ApiResponse<Void> deleteRow(
+    public ApiResponse<DataResponse> deleteRow(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable String tableName,
             @PathVariable Long id) {
-        dataService.deleteRowById(tableName, id, userDetails.getId());
-        return ApiResponse.success(HttpStatus.OK.value(), null);
+        DataResponse dr = dataService.deleteRowById(tableName, id, userDetails.getId());
+        return ApiResponse.success(HttpStatus.OK.value(), dr);
     }
 
     @PutMapping("/data/{tableName}/{id}")
     @ResponseStatus(HttpStatus.OK)
-    public ApiResponse<Void> updateRow(
+    public ApiResponse<DataResponse> updateRow(
             @AuthenticationPrincipal CustomUserDetails userDetails,
             @PathVariable String tableName,
             @PathVariable Long id,
             @RequestBody Map<String, Object> updateData) {
-        dataService.updateRowById(tableName, id, updateData, userDetails.getId());
-        return ApiResponse.success(HttpStatus.OK.value(), null);
+        DataResponse dr = dataService.updateRowById(tableName, id, updateData, userDetails.getId());
+        return ApiResponse.success(HttpStatus.OK.value(), dr);
     }
 
     @GetMapping("/data/{tableName}/{id}")

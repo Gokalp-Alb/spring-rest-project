@@ -26,7 +26,7 @@ public record CustomUserDetails(AppUser appUser) implements UserDetails {
     public Long getId() {return appUser.getId(); }
 
     @Override public boolean isAccountNonExpired() { return true; }
-    @Override public boolean isAccountNonLocked() { return  appUser.isActive(); }
+    @Override public boolean isAccountNonLocked() { return  appUser.getActive(); }
     @Override public boolean isCredentialsNonExpired() { return true; }
-    @Override public boolean isEnabled() { return appUser.isActive(); }
+    @Override public boolean isEnabled() { return appUser.getActive(); }
 }

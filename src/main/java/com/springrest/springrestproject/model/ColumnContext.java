@@ -1,16 +1,17 @@
 package com.springrest.springrestproject.model;
 
-import jakarta.persistence.*;
-import lombok.Data;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embeddable;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 
-
 @Embeddable
 @Data
-public class AdminSecurityContext {
+@Getter @Setter
+public class ColumnContext {
 
     @Column(name = "creator_id", updatable = false)
     private Long creatorId;
@@ -26,11 +27,13 @@ public class AdminSecurityContext {
     @Column(name = "last_changed_date")
     private LocalDateTime lastChangedDate;
 
-    @Column(name = "is_sensitive")
-    private boolean isSensitive = false;
+    @Column(name = "is_sensitive", nullable = false)
+    private Boolean isSensitive = false;
 
-    public void setIsSensitive(Boolean isSensitive){
-        this.isSensitive = isSensitive;
-    }
+    @Column(name = "is_unique", nullable = false)
+    private Boolean isUnique = false;
+
+    @Column(name = "validation_regex", length = 500)
+    private String validationRegex;
 
 }

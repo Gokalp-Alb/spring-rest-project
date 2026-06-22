@@ -5,8 +5,9 @@ import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
-import com.springrest.springrestproject.model.AdminSecurityContext;
+import com.springrest.springrestproject.model.ColumnContext;
 import com.springrest.springrestproject.model.SystemDdlLog;
+import com.springrest.springrestproject.model.TableContext;
 import com.springrest.springrestproject.model.TableMetadata;
 import com.springrest.springrestproject.repository.ISystemDdlLogRepo;
 import com.springrest.springrestproject.repository.ITableMetadataRepo;
@@ -35,24 +36,50 @@ public class MetadataService implements IMetadataService {
     @Transactional
     public TableMetadata createTable(String tableName, TableCreateRequest request, Long userId) {
         String columnsSql = request.columns().stream()
-                .map(col -> col.getColumnName() + " " + col.getDataType())
+                .map(col -> {
+                    String columnDef = col.getColumnName() + " " + col.getDataType();
+                    if (col.getColumnContext() != null && col.getColumnContext().getIsUnique()) {
+                        columnDef += " UNIQUE";
+                    }
+                    return columnDef;
+                })
                 .collect(Collectors.joining(", "));
         String createTableSql = String.format("CREATE TABLE IF NOT EXISTS %s (id SERIAL PRIMARY KEY, %s);",
                 tableName, columnsSql);
         logSchemaChange(tableName, createTableSql, userId);
         jdbcTemplate.execute(createTableSql);
 
-        AdminSecurityContext securityContext = new AdminSecurityContext();
-        securityContext.setCreatorId(userId);
-        securityContext.setLastUpdaterId(userId);
-        securityContext.setIsSensitive(request.isSensitive() != null && request.isSensitive());
+        TableContext tableContext = new TableContext();
+        tableContext.setCreatorId(userId);
+        tableContext.setLastUpdaterId(userId);
+
+        request.columns().forEach(col -> {
+            if (col.getColumnContext() == null) {
+                col.setColumnContext(new ColumnContext());
+            }
+
+            ColumnContext columnContext = col.getColumnContext();
+
+            columnContext.setCreatorId(userId);
+            columnContext.setLastUpdaterId(userId);
+
+            if (columnContext.getIsSensitive() == null) {
+                columnContext.setIsSensitive(false);
+            }
+            if (columnContext.getIsUnique() == null) {
+                columnContext.setIsUnique(false);
+            }
+            if (columnContext.getValidationRegex() == null) {
+                columnContext.setValidationRegex(null);
+            }
+        });
 
         TableMetadata metadata = new TableMetadata();
         metadata.setTableName(tableName);
         metadata.setColumns(request.columns());
-        metadata.setAdminContext(securityContext);
+        metadata.setTableContext(tableContext);
 
-        return tableMetadataRepo.save(metadata);
+        return tableMetadataRepo.saveAndFlush(metadata);
     }
 
     @Override
@@ -70,13 +97,18 @@ public class MetadataService implements IMetadataService {
 
     @Override
     @Transactional
-    public void deleteTableByName(String tableName, Long userId) {
+    public TableResponse deleteTableByName(String tableName, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         String dropTableSql = String.format("DROP TABLE IF EXISTS %s;", tableName);
         logSchemaChange(tableName, dropTableSql, userId);
         jdbcTemplate.execute(dropTableSql);
         tableMetadataRepo.delete(metadata);
+        return new TableResponse(
+                metadata.getId(),
+                tableName,
+                metadata.getColumns()
+        );
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

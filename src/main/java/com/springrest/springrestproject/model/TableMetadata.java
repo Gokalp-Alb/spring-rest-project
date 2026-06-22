@@ -15,10 +15,10 @@ public class TableMetadata {
     @Column(unique = true, nullable = false)
     private String tableName;
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "column_metadata", joinColumns = @JoinColumn(name = "table_id"))
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
+    @JoinColumn(name = "table_id")
     private List<ColumnMetadata> columns;
 
     @Embedded
-    private AdminSecurityContext adminContext;
+    private TableContext tableContext;
 }

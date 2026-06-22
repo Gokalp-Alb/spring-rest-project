@@ -6,13 +6,5 @@ import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
 
 public record TableCreateRequest(
-        @NotEmpty(message = "Columns list cannot be empty") List<ColumnMetadata> columns,
-        Boolean isSensitive
-) {
-    public TableCreateRequest {
-        if (isSensitive == null) {
-            isSensitive = false;
-        }
-    }
-
-}
+        @NotEmpty(message = "Columns list cannot be empty") List<ColumnMetadata> columns
+) {}

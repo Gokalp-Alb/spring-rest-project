@@ -18,8 +18,6 @@ public class KafkaMappingInitializer implements CommandLineRunner {
 
     @Override
     public void run(String @NonNull ... args) {
-        log.info("Initializing active inbound Kafka mappings...");
-
         mappingRepo.findByDirectionAndActiveTrue("INBOUND").forEach(mapping -> {
             try {
                 consumerManager.subscribeToInboundTopic(mapping.getKafkaTopic(), mapping.getTableName());

@@ -4,12 +4,13 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.SelectQueryRequest;
+import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.model.TableMetadata;
 import com.springrest.springrestproject.repository.ITableMetadataRepo;
 import com.springrest.springrestproject.repository.IUserRepo;
+import com.springrest.springrestproject.service.implementations.Kafka.OutboundKafkaPublisher;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
-import com.springrest.springrestproject.service.implementations.Kafka.OutboundKafkaPublisher;
 import com.springrest.springrestproject.util.DataEvaluationHelper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -18,6 +19,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,12 +39,13 @@ public class DataService implements IDataService {
 
     @Override
     @Transactional
-    public void insertRow(TableInsertRequest request, Long userId) {
+    public DataResponse insertRow(TableInsertRequest request, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+        dataHelper.validateRowRegex(metadata, request.rowData());
 
-        if (metadata.getAdminContext() != null) {
-            metadata.getAdminContext().setLastUpdaterId(userId);
+        if (metadata.getTableContext() != null) {
+            metadata.getTableContext().setLastUpdaterId(userId);
         }
 
         List<String> columns = new ArrayList<>(request.rowData().keySet());
@@ -54,14 +57,21 @@ public class DataService implements IDataService {
                 .map(col -> "?")
                 .collect(Collectors.joining(", "));
 
-        String insertSql = String.format("INSERT INTO %s (%s) VALUES (%s);",
+        String insertSql = String.format("INSERT INTO %s (%s) VALUES (%s) RETURNING id;",
                 request.tableName(), columnsSql, placeholdersSql);
 
         String logSql = dataHelper.rebuildFullSql(insertSql, values);
 
         metadataService.logSchemaChange(request.tableName(), logSql, userId);
-        jdbcTemplate.update(insertSql, values.toArray());
+        Long id = jdbcTemplate.queryForObject(insertSql, Long.class, values.toArray());
         kafkaPublisher.publishMutation(request.tableName(), "INSERT", request.rowData(), userId);
+
+        return new DataResponse(
+                id,
+                request.tableName(),
+                "INSERT",
+                request.rowData()
+        );
     }
 
     @Override
@@ -98,10 +108,12 @@ public class DataService implements IDataService {
     public Page<Map<String, Object>> getTableData(String tableName, Boolean showSensitive, Pageable pageable, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+
         String projection = dataHelper.getProjectionClause(metadata, showSensitive);
         String countSql = String.format("SELECT COUNT(*) FROM %s", tableName);
         Long totalElements = jdbcTemplate.queryForObject(countSql, Long.class);
         if (totalElements == null) totalElements = 0L;
+
         String dataSql = String.format("SELECT %s FROM %s LIMIT ? OFFSET ?", projection, tableName);
         List<Map<String, Object>> content = jdbcTemplate.queryForList(dataSql, pageable.getPageSize(), pageable.getOffset());
         return new PageImpl<>(content, pageable, totalElements);
@@ -111,7 +123,7 @@ public class DataService implements IDataService {
 
     @Override
     @Transactional
-    public void deleteRowById(String tableName, Long id, Long userId) {
+    public DataResponse deleteRowById(String tableName, Long id, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         String deleteSql = String.format("DELETE FROM %s WHERE id = ?;", tableName);
@@ -126,14 +138,20 @@ public class DataService implements IDataService {
         if (rowsAffected == 0) {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        if (metadata.getAdminContext() != null) {
-            metadata.getAdminContext().setLastUpdaterId(userId);
+        if (metadata.getTableContext() != null) {
+            metadata.getTableContext().setLastUpdaterId(userId);
         }
+        return new DataResponse(
+                id,
+                tableName,
+                "DELETE",
+                null
+        );
     }
 
     @Override
     @Transactional
-    public void updateRowById(String tableName, Long id, Map<String, Object> updateData, Long userId) {
+    public DataResponse updateRowById(String tableName, Long id, Map<String, Object> updateData, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         if (updateData == null || updateData.isEmpty()) {
@@ -164,9 +182,16 @@ public class DataService implements IDataService {
         if (rowsAffected == 0) {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        if (metadata.getAdminContext() != null) {
-            metadata.getAdminContext().setLastUpdaterId(userId);
+        if (metadata.getTableContext() != null) {
+            metadata.getTableContext().setLastUpdaterId(userId);
         }
+
+        return new DataResponse(
+                id,
+                tableName,
+                "UPDATE",
+                updateData
+        );
     }
 
     @Override
@@ -174,6 +199,7 @@ public class DataService implements IDataService {
     public Map<String, Object> findRowById(String tableName, Long id, Boolean showSensitive, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+
         String projection = dataHelper.getProjectionClause(metadata, showSensitive);
         String dataSql = String.format("SELECT %s FROM %s WHERE id = ?;", projection, tableName);
         List<Map<String, Object>> records = jdbcTemplate.queryForList(dataSql, id);
