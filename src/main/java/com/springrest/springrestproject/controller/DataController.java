@@ -2,7 +2,7 @@ package com.springrest.springrestproject.controller;
 
 import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
-import com.springrest.springrestproject.dto.request.query.SelectQueryRequest;
+import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.security.CustomUserDetails;
 import com.springrest.springrestproject.service.interfaces.IDataService;
@@ -41,7 +41,7 @@ public class DataController {
     @ResponseStatus(HttpStatus.OK)
     public ApiResponse<List<Map<String, Object>>> select(
             @AuthenticationPrincipal CustomUserDetails userDetails,
-            @RequestBody SelectQueryRequest request,
+            @RequestBody QueryRequest request,
             @RequestParam(name = "page", required = false, defaultValue = "0") int page,
             @RequestParam(name = "size", required = false, defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);

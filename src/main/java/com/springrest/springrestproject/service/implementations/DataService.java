@@ -3,7 +3,7 @@ package com.springrest.springrestproject.service.implementations;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
-import com.springrest.springrestproject.dto.request.query.SelectQueryRequest;
+import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.model.TableMetadata;
 import com.springrest.springrestproject.repository.ITableMetadataRepo;
@@ -75,33 +75,47 @@ public class DataService implements IDataService {
     }
 
     @Override
-    public List<Map<String, Object>> executeSelect(SelectQueryRequest request, Long userId, Pageable pageable) {
-        userRepo.findById(userId).orElseThrow(() -> new RuntimeException("User unrecognized"));
-
+    public List<Map<String, Object>> executeSelect(QueryRequest request, Long userId, Pageable pageable) {
+        userRepo.findById(userId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST));
         String fieldsStr = (request.fields() == null || request.fields().isEmpty())
                 ? "*"
                 : String.join(", ", request.fields());
 
         StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s FROM %s", fieldsStr, request.tableName()));
+        List<Object> queryParams = new ArrayList<>();
 
-        if (request.whereColumn() != null && !request.whereColumn().isEmpty()) {
-            sqlBuilder.append(String.format(" WHERE %s = ?", request.whereColumn()));
-            sqlBuilder.append(" LIMIT ? OFFSET ?");
-            return jdbcTemplate.queryForList(
-                    sqlBuilder.toString(),
-                    request.whereValue(),
-                    pageable.getPageSize(),
-                    pageable.getOffset()
-            );
+        if (request.conditions() != null && !request.conditions().isEmpty()) {
+            sqlBuilder.append(" WHERE ");
+            for (int i = 0; i < request.conditions().size(); i++) {
+                QueryRequest.Condition condition = request.conditions().get(i);
+                if (i > 0) {
+                    sqlBuilder.append(" AND ");
+                }
+                sqlBuilder.append(String.format("%s %s ?", condition.column(), condition.operator().getValue()));
+                queryParams.add(condition.value());
+            }
         }
 
-        sqlBuilder.append(" LIMIT ? OFFSET ?");
-        return jdbcTemplate.queryForList(
-                sqlBuilder.toString(),
-                pageable.getPageSize(),
-                pageable.getOffset()
-        );
-    }
+        if (request.sorts() != null && !request.sorts().isEmpty()) {
+            sqlBuilder.append(" ORDER BY ");
+            for (int i = 0; i < request.sorts().size(); i++) {
+                QueryRequest.Sort sort = request.sorts().get(i);
+                String dir = ("DESC".equalsIgnoreCase(sort.direction())) ? "DESC" : "ASC";
+                if (i > 0) {
+                    sqlBuilder.append(", ");
+                }
+                sqlBuilder.append(String.format("%s %s", sort.column(), dir));
+            }
+        }
+
+            sqlBuilder.append(" LIMIT ? OFFSET ?");
+            queryParams.add(pageable.getPageSize());
+            queryParams.add(pageable.getOffset());
+
+            return jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
+        }
+
 
     @Override
     @Transactional(readOnly = true)
