@@ -5,12 +5,9 @@ import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
-import com.springrest.springrestproject.model.ColumnContext;
-import com.springrest.springrestproject.model.SystemDdlLog;
-import com.springrest.springrestproject.model.TableContext;
-import com.springrest.springrestproject.model.TableMetadata;
-import com.springrest.springrestproject.repository.ISystemDdlLogRepo;
-import com.springrest.springrestproject.repository.ITableMetadataRepo;
+import com.springrest.springrestproject.model.*;
+import com.springrest.springrestproject.repository.SystemDdlLogRepo;
+import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -21,14 +18,15 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class MetadataService implements IMetadataService {
 
-    private final ITableMetadataRepo tableMetadataRepo;
-    private final ISystemDdlLogRepo ddlLogRepo;
+    private final TableMetadataRepo tableMetadataRepo;
+    private final SystemDdlLogRepo ddlLogRepo;
     private final JdbcTemplate jdbcTemplate;
     private final TableMapper tableMapper;
 
@@ -51,35 +49,35 @@ public class MetadataService implements IMetadataService {
 
         TableContext tableContext = new TableContext();
         tableContext.setCreatorId(userId);
+        tableContext.setCreatedDate(java.time.LocalDateTime.now());
         tableContext.setLastUpdaterId(userId);
+        tableContext.setLastChangedDate(java.time.LocalDateTime.now());
 
-        request.columns().forEach(col -> {
-            if (col.getColumnContext() == null) {
-                col.setColumnContext(new ColumnContext());
-            }
+        List<ColumnMetadata> domainColumns = request.columns().stream().map(srcCol -> {
+            ColumnMetadata targetCol = new ColumnMetadata();
+            targetCol.setColumnName(srcCol.getColumnName());
+            targetCol.setDataType(srcCol.getDataType());
 
-            ColumnContext columnContext = col.getColumnContext();
+            ColumnContext srcCtx = srcCol.getColumnContext();
+            ColumnContext targetCtx = new ColumnContext();
+            targetCtx.setCreatorId(userId);
+            targetCtx.setCreatedDate(java.time.LocalDateTime.now());
+            targetCtx.setLastUpdaterId(userId);
+            targetCtx.setLastChangedDate(java.time.LocalDateTime.now());
+            targetCtx.setIsSensitive(srcCtx != null && srcCtx.getIsSensitive() != null ? srcCtx.getIsSensitive() : false);
+            targetCtx.setIsUnique(srcCtx != null && srcCtx.getIsUnique() != null ? srcCtx.getIsUnique() : false);
+            targetCtx.setValidationRegex(srcCtx != null ? srcCtx.getValidationRegex() : null);
 
-            columnContext.setCreatorId(userId);
-            columnContext.setLastUpdaterId(userId);
-
-            if (columnContext.getIsSensitive() == null) {
-                columnContext.setIsSensitive(false);
-            }
-            if (columnContext.getIsUnique() == null) {
-                columnContext.setIsUnique(false);
-            }
-            if (columnContext.getValidationRegex() == null) {
-                columnContext.setValidationRegex(null);
-            }
-        });
+            targetCol.setColumnContext(targetCtx);
+            return targetCol;
+        }).toList();
 
         TableMetadata metadata = new TableMetadata();
         metadata.setTableName(tableName);
-        metadata.setColumns(request.columns());
+        metadata.setColumns(domainColumns);
         metadata.setTableContext(tableContext);
 
-        return tableMetadataRepo.saveAndFlush(metadata);
+        return tableMetadataRepo.save(metadata);
     }
 
     @Override

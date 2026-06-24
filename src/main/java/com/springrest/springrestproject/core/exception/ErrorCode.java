@@ -10,7 +10,8 @@ public enum ErrorCode {
     UNAUTHORIZED_ACCESS(HttpStatus.FORBIDDEN, "error.unauthorized_access"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "error.internal_server_error"),
     ALREADY_DELETED(HttpStatus.BAD_REQUEST, "error.already_deleted"),
-    VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "error.validation_failed");
+    VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "error.validation_failed"),
+    DUPLICATE_RESOURCE(HttpStatus.CONFLICT, "error.duplicate_resource");;
 
     private final HttpStatus httpStatus;
     private final String messageKey;

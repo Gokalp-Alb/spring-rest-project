@@ -6,8 +6,8 @@ import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.model.TableMetadata;
-import com.springrest.springrestproject.repository.ITableMetadataRepo;
-import com.springrest.springrestproject.repository.IUserRepo;
+import com.springrest.springrestproject.repository.AppUserRepo;
+import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.implementations.Kafka.OutboundKafkaPublisher;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -31,8 +31,8 @@ import java.util.stream.Collectors;
 public class DataService implements IDataService {
 
     private final JdbcTemplate jdbcTemplate;
-    private final ITableMetadataRepo tableMetadataRepo;
-    private final IUserRepo userRepo;
+    private final TableMetadataRepo tableMetadataRepo;
+    private final AppUserRepo userRepo;
     private final IMetadataService metadataService;
     private final DataEvaluationHelper dataHelper;
     private final OutboundKafkaPublisher kafkaPublisher;
@@ -183,9 +183,7 @@ public class DataService implements IDataService {
         String updateSql = String.format("UPDATE %s SET %s WHERE id = ?;", tableName, setSql);
         values.add(id);
 
-        List<Object> logValues = new ArrayList<>();
-        logValues.add(id);
-        String fullSqlForLog = dataHelper.rebuildFullSql(updateSql, logValues);
+        String fullSqlForLog = dataHelper.rebuildFullSql(updateSql, values);
         metadataService.logSchemaChange(tableName, fullSqlForLog, userId);
 
         int rowsAffected = jdbcTemplate.update(updateSql, values.toArray());

@@ -5,7 +5,7 @@ import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.AppUser;
-import com.springrest.springrestproject.repository.IUserRepo;
+import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class UserService implements IUserService {
 
-    private final IUserRepo userRepo;
+    private final AppUserRepo userRepo;
     private final PasswordEncoder passwordEncoder;
     private final IMetadataService metadataService;
 
@@ -48,7 +48,7 @@ public class UserService implements IUserService {
     @Override
     @Transactional(readOnly = true)
     public Page<UserResponse> getAllUsers(Pageable pageable) {
-        return userRepo.findAllProjectedBy(pageable);
+        return userRepo.findAll(pageable);
     }
 
     @Override

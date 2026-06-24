@@ -7,18 +7,22 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.sql.SQLException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @RestControllerAdvice
 @RequiredArgsConstructor
 public class GlobalExceptionHandler {
 
     private final MessageSource messageSource;
+    private static final Pattern DETAIL_PATTERN = Pattern.compile("Detail: Key \\((.*?)\\)=\\((.*?)\\) already exists\\.");
 
     @ExceptionHandler(ApplicationException.class)
     public ResponseEntity<ApiResponse<Void>> handleApplicationException(ApplicationException ex) {
@@ -59,6 +63,33 @@ public class GlobalExceptionHandler {
         );
 
         return new ResponseEntity<>(apiResponse, status);
+    }
+
+    @ExceptionHandler(DuplicateKeyException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDuplicateKeyException(DuplicateKeyException ex) {
+        HttpStatus status = ErrorCode.DUPLICATE_RESOURCE.getHttpStatus();
+
+        String baseMessage = messageSource.getMessage(
+                ErrorCode.DUPLICATE_RESOURCE.getMessageKey(),
+                null,
+                LocaleContextHolder.getLocale()
+        );
+        String finalMessage = buildDuplicateErrorMessage(baseMessage, ex.getMessage());
+
+        ApiResponse<Void> apiResponse = ApiResponse.failure(status.value(), finalMessage);
+        return new ResponseEntity<>(apiResponse, status);
+    }
+
+    private static String buildDuplicateErrorMessage(String baseMessage, String rawExceptionMessage) {
+        if (rawExceptionMessage != null) {
+            Matcher matcher = DETAIL_PATTERN.matcher(rawExceptionMessage);
+            if (matcher.find()) {
+                String fieldName = matcher.group(1);
+                String fieldValue = matcher.group(2);
+                return String.format("%s (Field: %s, Value: %s)", baseMessage, fieldName, fieldValue);
+            }
+        }
+        return baseMessage;
     }
 
     @ExceptionHandler(Exception.class)

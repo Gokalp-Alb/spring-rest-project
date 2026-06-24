@@ -1,6 +1,6 @@
 package com.springrest.springrestproject.config;
 
-import com.springrest.springrestproject.repository.IKafkaTableMappingRepo;
+import com.springrest.springrestproject.repository.KafkaTableMappingRepo;
 import com.springrest.springrestproject.service.implementations.Kafka.DynamicInboundConsumerManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class KafkaMappingInitializer implements CommandLineRunner {
 
-    private final IKafkaTableMappingRepo mappingRepo;
+    private final KafkaTableMappingRepo mappingRepo;
     private final DynamicInboundConsumerManager consumerManager;
 
     @Override

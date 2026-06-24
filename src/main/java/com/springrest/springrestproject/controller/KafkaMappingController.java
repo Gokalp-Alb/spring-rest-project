@@ -2,7 +2,7 @@ package com.springrest.springrestproject.controller;
 
 import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.model.KafkaTableMapping;
-import com.springrest.springrestproject.repository.IKafkaTableMappingRepo;
+import com.springrest.springrestproject.repository.KafkaTableMappingRepo;
 import com.springrest.springrestproject.service.implementations.Kafka.DynamicInboundConsumerManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class KafkaMappingController {
 
-    private final IKafkaTableMappingRepo mappingRepo;
+    private final KafkaTableMappingRepo mappingRepo;
     private final DynamicInboundConsumerManager consumerManager;
 
     @PostMapping
