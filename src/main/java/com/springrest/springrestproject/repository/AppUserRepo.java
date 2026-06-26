@@ -15,6 +15,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static jooq.generated.Tables.APP_USERS;
+import static jooq.generated.Tables.APP_USERS_LOG;
 
 @Repository
 @RequiredArgsConstructor
@@ -69,6 +70,7 @@ public class AppUserRepo {
                             .fetchOne())
                     .getValue(APP_USERS.ID);
             user.setId(generatedId);
+            logAppUserMutation(user, "POST");
         } else {
             dsl.update(APP_USERS)
                     .set(APP_USERS.USERNAME, user.getUsername())
@@ -77,7 +79,25 @@ public class AppUserRepo {
                     .set(APP_USERS.ACTIVE, user.getActive())
                     .where(APP_USERS.ID.eq(user.getId()))
                     .execute();
+            logAppUserMutation(user, "PUT");
         }
         return user;
+    }
+
+    private void logAppUserMutation(AppUser user, String operation) {
+        Long executorId = com.springrest.springrestproject.util.SecurityUtils.getCurrentUserId();
+        if (executorId == null) {
+            executorId = 0L;
+        }
+        dsl.insertInto(APP_USERS_LOG)
+                .set(APP_USERS_LOG.ID, user.getId())
+                .set(APP_USERS_LOG.ACTIVE, user.getActive())
+                .set(APP_USERS_LOG.PASSWORD, user.getPassword())
+                .set(APP_USERS_LOG.ROLE, user.getRole() != null ? user.getRole().name() : null)
+                .set(APP_USERS_LOG.USERNAME, user.getUsername())
+                .set(APP_USERS_LOG.OPERATION_TYPE, operation)
+                .set(APP_USERS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
+                .set(APP_USERS_LOG.USER_ID, executorId)
+                .execute();
     }
 }

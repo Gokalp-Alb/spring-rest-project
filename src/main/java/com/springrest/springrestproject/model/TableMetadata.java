@@ -9,4 +9,5 @@ public class TableMetadata {
     private String tableName;
     private List<ColumnMetadata> columns;
     private TableContext tableContext;
+    private Boolean isAuditEnabled;
 }

@@ -5,6 +5,7 @@ import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
+import com.springrest.springrestproject.dto.request.table.AuditRequest;
 import com.springrest.springrestproject.model.TableMetadata;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
@@ -40,6 +41,9 @@ public class DataService implements IDataService {
     @Override
     @Transactional
     public DataResponse insertRow(TableInsertRequest request, Long userId) {
+        if (request.tableName().toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+        }
         TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         dataHelper.validateRowRegex(metadata, request.rowData());
@@ -65,6 +69,15 @@ public class DataService implements IDataService {
         metadataService.logSchemaChange(request.tableName(), logSql, userId);
         Long id = jdbcTemplate.queryForObject(insertSql, Long.class, values.toArray());
         kafkaPublisher.publishMutation(request.tableName(), "INSERT", request.rowData(), userId);
+
+        auditLogMutation(AuditRequest.builder()
+                .tableMetadata(metadata)
+                .recordId(id)
+                .rowData(request.rowData())
+                .operationType("POST")
+                .executedAt(java.time.LocalDateTime.now())
+                .userId(userId)
+                .build());
 
         return new DataResponse(
                 id,
@@ -137,6 +150,9 @@ public class DataService implements IDataService {
     @Override
     @Transactional
     public DataResponse deleteRowById(String tableName, Long id, Long userId) {
+        if (tableName.toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+        }
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         String deleteSql = String.format("DELETE FROM %s WHERE id = ?;", tableName);
@@ -146,6 +162,14 @@ public class DataService implements IDataService {
         String fullSqlForLog = dataHelper.rebuildFullSql(deleteSql, logValues);
         metadataService.logSchemaChange(tableName, fullSqlForLog, userId);
 
+        Map<String, Object> beforeState = null;
+        if (metadata.getIsAuditEnabled() != null && metadata.getIsAuditEnabled()) {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(String.format("SELECT * FROM %s WHERE id = ?;", tableName), id);
+            if (!rows.isEmpty()) {
+                beforeState = rows.getFirst();
+            }
+        }
+
         int rowsAffected = jdbcTemplate.update(deleteSql, id);
         kafkaPublisher.publishMutation(tableName, "DELETE", Map.of("id", id), userId);
         if (rowsAffected == 0) {
@@ -154,6 +178,18 @@ public class DataService implements IDataService {
         if (metadata.getTableContext() != null) {
             metadata.getTableContext().setLastUpdaterId(userId);
         }
+
+        if (beforeState != null) {
+            auditLogMutation(AuditRequest.builder()
+                    .tableMetadata(metadata)
+                    .recordId(id)
+                    .rowData(beforeState)
+                    .operationType("DELETE")
+                    .executedAt(java.time.LocalDateTime.now())
+                    .userId(userId)
+                    .build());
+        }
+
         return new DataResponse(
                 id,
                 tableName,
@@ -165,6 +201,9 @@ public class DataService implements IDataService {
     @Override
     @Transactional
     public DataResponse updateRowById(String tableName, Long id, Map<String, Object> updateData, Long userId) {
+        if (tableName.toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+        }
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         if (updateData == null || updateData.isEmpty()) {
@@ -197,6 +236,20 @@ public class DataService implements IDataService {
             metadata.getTableContext().setLastUpdaterId(userId);
         }
 
+        if (metadata.getIsAuditEnabled() != null && metadata.getIsAuditEnabled()) {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(String.format("SELECT * FROM %s WHERE id = ?;", tableName), id);
+            if (!rows.isEmpty()) {
+                auditLogMutation(AuditRequest.builder()
+                        .tableMetadata(metadata)
+                        .recordId(id)
+                        .rowData(rows.getFirst())
+                        .operationType("PUT")
+                        .executedAt(java.time.LocalDateTime.now())
+                        .userId(userId)
+                        .build());
+            }
+        }
+
         return new DataResponse(
                 id,
                 tableName,
@@ -218,6 +271,46 @@ public class DataService implements IDataService {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
         }
         return records.getFirst();
+    }
+
+    private void auditLogMutation(AuditRequest auditReq) {
+        TableMetadata metadata = auditReq.tableMetadata();
+        if (metadata.getIsAuditEnabled() != null && metadata.getIsAuditEnabled()) {
+            String logTableName = metadata.getTableName() + "_log";
+            List<String> columns = new ArrayList<>();
+            List<Object> values = new ArrayList<>();
+
+            columns.add("id");
+            values.add(auditReq.recordId());
+
+            columns.add("operation_type");
+            values.add(auditReq.operationType());
+
+            columns.add("executed_at");
+            values.add(auditReq.executedAt());
+
+            columns.add("user_id");
+            values.add(auditReq.userId() != null ? auditReq.userId() : 0L);
+
+            if (auditReq.rowData() != null && metadata.getColumns() != null) {
+                for (var col : metadata.getColumns()) {
+                    String colName = col.getColumnName();
+                    Object val = auditReq.rowData().entrySet().stream()
+                            .filter(e -> e.getKey().equalsIgnoreCase(colName))
+                            .map(Map.Entry::getValue)
+                            .findFirst()
+                            .orElse(null);
+                    columns.add(colName);
+                    values.add(val);
+                }
+            }
+
+            String columnsSql = String.join(", ", columns);
+            String placeholdersSql = columns.stream().map(c -> "?").collect(Collectors.joining(", "));
+            String insertSql = String.format("INSERT INTO %s (%s) VALUES (%s);", logTableName, columnsSql, placeholdersSql);
+
+            jdbcTemplate.update(insertSql, values.toArray());
+        }
     }
 
 }

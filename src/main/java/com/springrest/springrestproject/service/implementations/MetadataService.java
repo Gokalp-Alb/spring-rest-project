@@ -33,6 +33,9 @@ public class MetadataService implements IMetadataService {
     @Override
     @Transactional
     public TableMetadata createTable(String tableName, TableCreateRequest request, Long userId) {
+        if (tableName.toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+        }
         String columnsSql = request.columns().stream()
                 .map(col -> {
                     String columnDef = col.getColumnName() + " " + col.getDataType();
@@ -46,6 +49,19 @@ public class MetadataService implements IMetadataService {
                 tableName, columnsSql);
         logSchemaChange(tableName, createTableSql, userId);
         jdbcTemplate.execute(createTableSql);
+
+        if (request.isAuditEnabled() != null && request.isAuditEnabled()) {
+            String logTableName = tableName + "_log";
+            String logColumnsSql = request.columns().stream()
+                    .map(col -> col.getColumnName() + " " + col.getDataType())
+                    .collect(Collectors.joining(", "));
+            String logColumnsStr = logColumnsSql.isEmpty() ? "" : ", " + logColumnsSql;
+            String createLogTableSql = String.format(
+                    "CREATE TABLE IF NOT EXISTS %s (log_id BIGSERIAL PRIMARY KEY, id BIGINT%s, operation_type VARCHAR(50), executed_at TIMESTAMP, user_id BIGINT);",
+                    logTableName, logColumnsStr);
+            logSchemaChange(logTableName, createLogTableSql, userId);
+            jdbcTemplate.execute(createLogTableSql);
+        }
 
         TableContext tableContext = new TableContext();
         tableContext.setCreatorId(userId);
@@ -76,6 +92,7 @@ public class MetadataService implements IMetadataService {
         metadata.setTableName(tableName);
         metadata.setColumns(domainColumns);
         metadata.setTableContext(tableContext);
+        metadata.setIsAuditEnabled(request.isAuditEnabled() != null ? request.isAuditEnabled() : false);
 
         return tableMetadataRepo.save(metadata);
     }
@@ -103,6 +120,9 @@ public class MetadataService implements IMetadataService {
     @Override
     @Transactional
     public TableResponse deleteTableByName(String tableName, Long userId) {
+        if (tableName.toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+        }
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         String dropTableSql = String.format("DROP TABLE IF EXISTS %s;", tableName);
@@ -112,7 +132,8 @@ public class MetadataService implements IMetadataService {
         return new TableResponse(
                 metadata.getId(),
                 tableName,
-                metadata.getColumns()
+                metadata.getColumns(),
+                metadata.getTableContext()
         );
     }
 

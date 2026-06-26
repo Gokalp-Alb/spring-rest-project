@@ -32,6 +32,7 @@ public class AdminInitializerConfig {
                 defaultAdmin.setUsername(adminUsername);
                 defaultAdmin.setPassword(passwordEncoder.encode(adminPassword));
                 defaultAdmin.setRole(Role.ADMIN);
+                defaultAdmin.setActive(true);
                 userRepo.save(defaultAdmin);
             }
         };

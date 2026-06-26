@@ -16,6 +16,8 @@ import java.util.Optional;
 
 import static jooq.generated.Tables.COLUMN_METADATA;
 import static jooq.generated.Tables.TABLE_METADATA;
+import static jooq.generated.Tables.COLUMN_METADATA_LOG;
+import static jooq.generated.Tables.TABLE_METADATA_LOG;
 
 @Repository
 @RequiredArgsConstructor
@@ -33,16 +35,25 @@ public class TableMetadataRepo {
                             .set(TABLE_METADATA.CREATED_DATE, tableCtx != null ? tableCtx.getCreatedDate() : java.time.LocalDateTime.now())
                             .set(TABLE_METADATA.LAST_UPDATER_ID, tableCtx != null ? tableCtx.getLastUpdaterId() : null)
                             .set(TABLE_METADATA.LAST_CHANGED_DATE, tableCtx != null ? tableCtx.getLastChangedDate() : java.time.LocalDateTime.now())
+                            .set(TABLE_METADATA.IS_AUDIT_ENABLED, metadata.getIsAuditEnabled() != null ? metadata.getIsAuditEnabled() : false)
                             .returning(TABLE_METADATA.ID)
                             .fetchOne())
                     .getValue(TABLE_METADATA.ID);
 
             metadata.setId(generatedId);
+            logTableMetadataMutation(metadata, "POST");
         } else {
+            logTableMetadataMutation(metadata, "PUT");
+            List<ColumnMetadata> oldColumns = fetchColumnsForTable(metadata.getId());
+            for (ColumnMetadata oldCol : oldColumns) {
+                logColumnMetadataMutation(oldCol, metadata.getId(), "DELETE");
+            }
+
             dsl.update(TABLE_METADATA)
                     .set(TABLE_METADATA.TABLE_NAME, metadata.getTableName())
                     .set(TABLE_METADATA.LAST_UPDATER_ID, tableCtx != null ? tableCtx.getLastUpdaterId() : null)
                     .set(TABLE_METADATA.LAST_CHANGED_DATE, tableCtx != null ? tableCtx.getLastChangedDate() : java.time.LocalDateTime.now())
+                    .set(TABLE_METADATA.IS_AUDIT_ENABLED, metadata.getIsAuditEnabled() != null ? metadata.getIsAuditEnabled() : false)
                     .where(TABLE_METADATA.ID.eq(metadata.getId()))
                     .execute();
 
@@ -52,10 +63,9 @@ public class TableMetadataRepo {
         }
 
         if (metadata.getColumns() != null && !metadata.getColumns().isEmpty()) {
-            var batchQueries = dsl.batch(
-                    metadata.getColumns().stream().map(col -> {
-                        var colCtx = col.getColumnContext();
-                        return (org.jooq.Query) dsl.insertInto(COLUMN_METADATA)
+            for (ColumnMetadata col : metadata.getColumns()) {
+                var colCtx = col.getColumnContext();
+                Long generatedColId = Objects.requireNonNull(dsl.insertInto(COLUMN_METADATA)
                                 .set(COLUMN_METADATA.TABLE_ID, metadata.getId())
                                 .set(COLUMN_METADATA.COLUMN_NAME, col.getColumnName())
                                 .set(COLUMN_METADATA.DATA_TYPE, col.getDataType())
@@ -65,23 +75,75 @@ public class TableMetadataRepo {
                                 .set(COLUMN_METADATA.LAST_CHANGED_DATE, colCtx != null ? colCtx.getLastChangedDate() : java.time.LocalDateTime.now())
                                 .set(COLUMN_METADATA.IS_SENSITIVE, colCtx != null ? colCtx.getIsSensitive() : false)
                                 .set(COLUMN_METADATA.IS_UNIQUE, colCtx != null ? colCtx.getIsUnique() : false)
-                                .set(COLUMN_METADATA.VALIDATION_REGEX, colCtx != null ? colCtx.getValidationRegex() : null);
-                    }).toList()
-            );
-
-            batchQueries.execute();
+                                .set(COLUMN_METADATA.VALIDATION_REGEX, colCtx != null ? colCtx.getValidationRegex() : null)
+                                .returning(COLUMN_METADATA.ID)
+                                .fetchOne())
+                        .getValue(COLUMN_METADATA.ID);
+                col.setId(generatedColId);
+                logColumnMetadataMutation(col, metadata.getId(), "POST");
+            }
         }
         return metadata;
     }
 
     @Transactional
     public void delete(TableMetadata metadata) {
+        logTableMetadataMutation(metadata, "DELETE");
+        List<ColumnMetadata> oldColumns = fetchColumnsForTable(metadata.getId());
+        for (ColumnMetadata oldCol : oldColumns) {
+            logColumnMetadataMutation(oldCol, metadata.getId(), "DELETE");
+        }
+
         dsl.deleteFrom(COLUMN_METADATA)
                 .where(COLUMN_METADATA.TABLE_ID.eq(metadata.getId()))
                 .execute();
 
         dsl.deleteFrom(TABLE_METADATA)
                 .where(TABLE_METADATA.ID.eq(metadata.getId()))
+                .execute();
+    }
+
+    private void logTableMetadataMutation(TableMetadata metadata, String operation) {
+        Long executorId = com.springrest.springrestproject.util.SecurityUtils.getCurrentUserId();
+        if (executorId == null) {
+            executorId = 0L;
+        }
+        var tableCtx = metadata.getTableContext();
+        dsl.insertInto(TABLE_METADATA_LOG)
+                .set(TABLE_METADATA_LOG.ID, metadata.getId())
+                .set(TABLE_METADATA_LOG.TABLE_NAME, metadata.getTableName())
+                .set(TABLE_METADATA_LOG.CREATOR_ID, tableCtx != null ? tableCtx.getCreatorId() : null)
+                .set(TABLE_METADATA_LOG.CREATED_DATE, tableCtx != null ? tableCtx.getCreatedDate() : java.time.LocalDateTime.now())
+                .set(TABLE_METADATA_LOG.LAST_UPDATER_ID, tableCtx != null ? tableCtx.getLastUpdaterId() : null)
+                .set(TABLE_METADATA_LOG.LAST_CHANGED_DATE, tableCtx != null ? tableCtx.getLastChangedDate() : java.time.LocalDateTime.now())
+                .set(TABLE_METADATA_LOG.IS_AUDIT_ENABLED, metadata.getIsAuditEnabled() != null ? metadata.getIsAuditEnabled() : false)
+                .set(TABLE_METADATA_LOG.OPERATION_TYPE, operation)
+                .set(TABLE_METADATA_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
+                .set(TABLE_METADATA_LOG.USER_ID, executorId)
+                .execute();
+    }
+
+    private void logColumnMetadataMutation(ColumnMetadata col, Long tableId, String operation) {
+        Long executorId = com.springrest.springrestproject.util.SecurityUtils.getCurrentUserId();
+        if (executorId == null) {
+            executorId = 0L;
+        }
+        var colCtx = col.getColumnContext();
+        dsl.insertInto(COLUMN_METADATA_LOG)
+                .set(COLUMN_METADATA_LOG.ID, col.getId())
+                .set(COLUMN_METADATA_LOG.TABLE_ID, tableId)
+                .set(COLUMN_METADATA_LOG.COLUMN_NAME, col.getColumnName())
+                .set(COLUMN_METADATA_LOG.DATA_TYPE, col.getDataType())
+                .set(COLUMN_METADATA_LOG.CREATOR_ID, colCtx != null ? colCtx.getCreatorId() : null)
+                .set(COLUMN_METADATA_LOG.CREATED_DATE, colCtx != null ? colCtx.getCreatedDate() : java.time.LocalDateTime.now())
+                .set(COLUMN_METADATA_LOG.LAST_UPDATER_ID, colCtx != null ? colCtx.getLastUpdaterId() : null)
+                .set(COLUMN_METADATA_LOG.LAST_CHANGED_DATE, colCtx != null ? colCtx.getLastChangedDate() : java.time.LocalDateTime.now())
+                .set(COLUMN_METADATA_LOG.IS_SENSITIVE, colCtx != null ? colCtx.getIsSensitive() : false)
+                .set(COLUMN_METADATA_LOG.IS_UNIQUE, colCtx != null ? colCtx.getIsUnique() : false)
+                .set(COLUMN_METADATA_LOG.VALIDATION_REGEX, colCtx != null ? colCtx.getValidationRegex() : null)
+                .set(COLUMN_METADATA_LOG.OPERATION_TYPE, operation)
+                .set(COLUMN_METADATA_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
+                .set(COLUMN_METADATA_LOG.USER_ID, executorId)
                 .execute();
     }
 
@@ -95,6 +157,7 @@ public class TableMetadataRepo {
 
         for (TableMetadata table : tables) {
             table.setColumns(fetchColumnsForTable(table.getId()));
+            populateTableContext(table);
         }
 
         return new PageImpl<>(tables, pageable, total);
@@ -129,6 +192,7 @@ public class TableMetadataRepo {
                 .fetchOneInto(TableMetadata.class);
         if (metadata != null) {
             metadata.setColumns(fetchColumnsForTable(tableId));
+            populateTableContext(metadata);
         }
 
         return Optional.ofNullable(metadata);
@@ -140,6 +204,7 @@ public class TableMetadataRepo {
                 .fetchOneInto(TableMetadata.class);
         if (metadata != null) {
             metadata.setColumns(fetchColumnsForTable(metadata.getId()));
+            populateTableContext(metadata);
         }
 
         return Optional.ofNullable(metadata);
@@ -151,8 +216,26 @@ public class TableMetadataRepo {
                 .fetchOneInto(TableMetadata.class);
         if (metadata != null) {
             metadata.setColumns(fetchColumnsForTable(metadata.getId()));
+            populateTableContext(metadata);
         }
 
         return Optional.ofNullable(metadata);
+    }
+
+    private void populateTableContext(TableMetadata metadata) {
+        if (metadata == null) return;
+        var record = dsl.select(TABLE_METADATA.CREATOR_ID, TABLE_METADATA.CREATED_DATE,
+                                TABLE_METADATA.LAST_UPDATER_ID, TABLE_METADATA.LAST_CHANGED_DATE)
+                .from(TABLE_METADATA)
+                .where(TABLE_METADATA.ID.eq(metadata.getId()))
+                .fetchOne();
+        if (record != null) {
+            com.springrest.springrestproject.model.TableContext ctx = new com.springrest.springrestproject.model.TableContext();
+            ctx.setCreatorId(record.get(TABLE_METADATA.CREATOR_ID));
+            ctx.setCreatedDate(record.get(TABLE_METADATA.CREATED_DATE));
+            ctx.setLastUpdaterId(record.get(TABLE_METADATA.LAST_UPDATER_ID));
+            ctx.setLastChangedDate(record.get(TABLE_METADATA.LAST_CHANGED_DATE));
+            metadata.setTableContext(ctx);
+        }
     }
 }

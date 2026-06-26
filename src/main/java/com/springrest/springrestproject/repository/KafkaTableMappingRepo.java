@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static jooq.generated.Tables.KAFKA_TABLE_MAPPINGS;
+import static jooq.generated.Tables.KAFKA_TABLE_MAPPINGS_LOG;
 
 @Repository
 @RequiredArgsConstructor
@@ -52,6 +53,7 @@ public class KafkaTableMappingRepo {
                             .fetchOne())
                     .getValue(KAFKA_TABLE_MAPPINGS.ID);
             mapping.setId(generatedId);
+            logKafkaTableMappingMutation(mapping, "POST");
         } else {
             dsl.update(KAFKA_TABLE_MAPPINGS)
                     .set(KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.getTableName())
@@ -60,7 +62,25 @@ public class KafkaTableMappingRepo {
                     .set(KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.isActive())
                     .where(KAFKA_TABLE_MAPPINGS.ID.eq(mapping.getId()))
                     .execute();
+            logKafkaTableMappingMutation(mapping, "PUT");
         }
         return mapping;
+    }
+
+    private void logKafkaTableMappingMutation(KafkaTableMapping mapping, String operation) {
+        Long executorId = com.springrest.springrestproject.util.SecurityUtils.getCurrentUserId();
+        if (executorId == null) {
+            executorId = 0L;
+        }
+        dsl.insertInto(KAFKA_TABLE_MAPPINGS_LOG)
+                .set(KAFKA_TABLE_MAPPINGS_LOG.ID, mapping.getId())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.ACTIVE, mapping.isActive())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.DIRECTION, mapping.getDirection())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.KAFKA_TOPIC, mapping.getKafkaTopic())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.TABLE_NAME, mapping.getTableName())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.OPERATION_TYPE, operation)
+                .set(KAFKA_TABLE_MAPPINGS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.USER_ID, executorId)
+                .execute();
     }
 }

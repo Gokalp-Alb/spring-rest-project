@@ -1,7 +1,7 @@
 -- SECURITY & USER INFRASTRUCTURE
 
 CREATE TABLE app_users (
-                           id SERIAL PRIMARY KEY,
+                           id BIGSERIAL PRIMARY KEY,
                            active BOOLEAN DEFAULT TRUE,
                            password VARCHAR(500) NOT NULL,
                            role VARCHAR(50) NOT NULL,
@@ -32,17 +32,18 @@ CREATE TABLE spring_session_attributes (
 --DYNAMIC SYSTEM ENGINE METADATA
 
 CREATE TABLE table_metadata (
-                                id SERIAL PRIMARY KEY,
+                                id BIGSERIAL PRIMARY KEY,
                                 table_name VARCHAR(255) NOT NULL UNIQUE,
                                 creator_id BIGINT,
                                 created_date TIMESTAMP,
                                 last_updater_id BIGINT,
-                                last_changed_date TIMESTAMP
+                                last_changed_date TIMESTAMP,
+                                is_audit_enabled BOOLEAN DEFAULT FALSE
 );
 
 CREATE TABLE column_metadata (
-                                 id SERIAL PRIMARY KEY,
-                                 table_id INT REFERENCES table_metadata(id) ON DELETE CASCADE,
+                                 id BIGSERIAL PRIMARY KEY,
+                                 table_id BIGINT REFERENCES table_metadata(id) ON DELETE CASCADE,
                                  column_name VARCHAR(255) NOT NULL,
                                  data_type VARCHAR(50) NOT NULL,
                                  creator_id BIGINT,
@@ -58,7 +59,7 @@ CREATE TABLE column_metadata (
 -- AUDIT LOGGING & EVENT MAPPING
 
 CREATE TABLE system_ddl_log (
-                                id SERIAL PRIMARY KEY,
+                                id BIGSERIAL PRIMARY KEY,
                                 executed_at TIMESTAMP NOT NULL,
                                 executed_sql TEXT NOT NULL,
                                 table_name VARCHAR(255),
@@ -66,9 +67,67 @@ CREATE TABLE system_ddl_log (
 );
 
 CREATE TABLE kafka_table_mappings (
-                                      id SERIAL PRIMARY KEY,
+                                      id BIGSERIAL PRIMARY KEY,
                                       active BOOLEAN DEFAULT TRUE,
                                       direction VARCHAR(50),
                                       kafka_topic VARCHAR(255) NOT NULL,
                                       table_name VARCHAR(255) NOT NULL
+);
+
+-- SYSTEM LOG TABLES FOR AUDITING
+
+CREATE TABLE app_users_log (
+    log_id BIGSERIAL PRIMARY KEY,
+    id BIGINT,
+    active BOOLEAN,
+    password VARCHAR(500),
+    role VARCHAR(50),
+    username VARCHAR(255),
+    operation_type VARCHAR(50),
+    executed_at TIMESTAMP,
+    user_id BIGINT
+);
+
+CREATE TABLE table_metadata_log (
+    log_id BIGSERIAL PRIMARY KEY,
+    id BIGINT,
+    table_name VARCHAR(255),
+    creator_id BIGINT,
+    created_date TIMESTAMP,
+    last_updater_id BIGINT,
+    last_changed_date TIMESTAMP,
+    is_audit_enabled BOOLEAN,
+    operation_type VARCHAR(50),
+    executed_at TIMESTAMP,
+    user_id BIGINT
+);
+
+CREATE TABLE column_metadata_log (
+    log_id BIGSERIAL PRIMARY KEY,
+    id BIGINT,
+    table_id BIGINT,
+    column_name VARCHAR(255),
+    data_type VARCHAR(50),
+    creator_id BIGINT,
+    created_date TIMESTAMP,
+    last_updater_id BIGINT,
+    last_changed_date TIMESTAMP,
+    is_sensitive BOOLEAN,
+    is_unique BOOLEAN,
+    validation_regex VARCHAR(500),
+    operation_type VARCHAR(50),
+    executed_at TIMESTAMP,
+    user_id BIGINT
+);
+
+CREATE TABLE kafka_table_mappings_log (
+    log_id BIGSERIAL PRIMARY KEY,
+    id BIGINT,
+    active BOOLEAN,
+    direction VARCHAR(50),
+    kafka_topic VARCHAR(255),
+    table_name VARCHAR(255),
+    operation_type VARCHAR(50),
+    executed_at TIMESTAMP,
+    user_id BIGINT
 );

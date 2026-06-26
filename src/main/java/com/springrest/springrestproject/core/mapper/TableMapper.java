@@ -7,6 +7,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class TableMapper {
     public TableResponse toResponse(TableMetadata metadata) {
-        return new TableResponse(metadata.getId(), metadata.getTableName(), metadata.getColumns());
+        return new TableResponse(
+                metadata.getId(),
+                metadata.getTableName(),
+                metadata.getColumns(),
+                metadata.getTableContext()
+        );
     }
 }
