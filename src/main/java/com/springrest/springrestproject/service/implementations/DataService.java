@@ -101,11 +101,10 @@ public class DataService implements IDataService {
             sqlBuilder.append(" ORDER BY ");
             for (int i = 0; i < request.sorts().size(); i++) {
                 QueryRequest.Sort sort = request.sorts().get(i);
-                String dir = ("DESC".equalsIgnoreCase(sort.direction())) ? "DESC" : "ASC";
                 if (i > 0) {
                     sqlBuilder.append(", ");
                 }
-                sqlBuilder.append(String.format("%s %s", sort.column(), dir));
+                sqlBuilder.append(String.format("%s %s", sort.column(), sort.direction().getValue()));
             }
         }
 
@@ -114,7 +113,7 @@ public class DataService implements IDataService {
             queryParams.add(pageable.getOffset());
 
             return jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
-        }
+    }
 
 
     @Override

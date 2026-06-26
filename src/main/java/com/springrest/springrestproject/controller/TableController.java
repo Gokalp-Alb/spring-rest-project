@@ -1,10 +1,9 @@
 package com.springrest.springrestproject.controller;
 
-import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.core.mapper.TableMapper;
+import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
-import com.springrest.springrestproject.security.CustomUserDetails;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +12,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 
@@ -28,9 +28,9 @@ public class TableController {
     @PostMapping("/{tableName}")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<TableResponse> createTable(@Valid @RequestBody TableCreateRequest request,
-                                                  @AuthenticationPrincipal CustomUserDetails userDetails,
+                                                  @AuthenticationPrincipal Jwt jwt,
                                                   @PathVariable String tableName) {
-        TableResponse response = tableMapper.toResponse(metadataService.createTable(tableName, request, userDetails.getId()));
+        TableResponse response = tableMapper.toResponse(metadataService.createTable(tableName, request, jwt.getClaim("userId")));
         return ApiResponse.success(HttpStatus.CREATED.value(), response);
     }
 
@@ -44,19 +44,26 @@ public class TableController {
         return ApiResponse.success(HttpStatus.OK.value(), tables);
     }
 
-    @GetMapping("/{tableId}")
+    @GetMapping("/id/{tableId}")
     @ResponseStatus(HttpStatus.OK)
     public ApiResponse<TableResponse> getById(@PathVariable Long tableId) {
         TableResponse table = metadataService.getTableById(tableId);
         return ApiResponse.success(HttpStatus.OK.value(), table);
     }
 
+    @GetMapping("/name/{tableName}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<TableResponse> getByName(@PathVariable String tableName) {
+        TableResponse table = metadataService.getTableByName(tableName);
+        return ApiResponse.success(HttpStatus.OK.value(), table);
+    }
+
     @DeleteMapping("/{tableName}")
     @ResponseStatus(HttpStatus.OK)
     public ApiResponse<TableResponse> deleteTable(
-            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @AuthenticationPrincipal Jwt jwt,
             @PathVariable String tableName) {
-        TableResponse tr = metadataService.deleteTableByName(tableName, userDetails.getId());
+        TableResponse tr = metadataService.deleteTableByName(tableName, jwt.getClaim("userId"));
         return ApiResponse.success(HttpStatus.OK.value(), tr);
     }
 }

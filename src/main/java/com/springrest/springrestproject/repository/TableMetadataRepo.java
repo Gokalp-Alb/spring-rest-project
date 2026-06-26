@@ -105,6 +105,7 @@ public class TableMetadataRepo {
                 .where(COLUMN_METADATA.TABLE_ID.eq(tableId))
                 .fetch(record -> {
                     ColumnMetadata col = new ColumnMetadata();
+                    col.setId(record.get(COLUMN_METADATA.ID));
                     col.setColumnName(record.get(COLUMN_METADATA.COLUMN_NAME));
                     col.setDataType(record.get(COLUMN_METADATA.DATA_TYPE));
 
@@ -128,6 +129,17 @@ public class TableMetadataRepo {
                 .fetchOneInto(TableMetadata.class);
         if (metadata != null) {
             metadata.setColumns(fetchColumnsForTable(tableId));
+        }
+
+        return Optional.ofNullable(metadata);
+    }
+
+    public Optional<TableMetadata> findByName(String tableName) {
+        TableMetadata metadata = dsl.selectFrom(TABLE_METADATA)
+                .where(TABLE_METADATA.TABLE_NAME.eq(tableName))
+                .fetchOneInto(TableMetadata.class);
+        if (metadata != null) {
+            metadata.setColumns(fetchColumnsForTable(metadata.getId()));
         }
 
         return Optional.ofNullable(metadata);

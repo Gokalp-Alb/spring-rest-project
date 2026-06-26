@@ -65,6 +65,26 @@ public class UserService implements IUserService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public UserRequest getUserByName(String name) {
+        AppUser user = userRepo.findByUsername(name)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+        return new UserRequest(
+                user.getId(),
+                user.getUsername(),
+                user.getRole(),
+                "********"
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AppUser findByUsername(String username) {
+        return userRepo.findByUsername(username)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+    }
+
+    @Override
     @Transactional
     public void deleteUserById(Long id, Long userId) {
         AppUser user = userRepo.findById(id)

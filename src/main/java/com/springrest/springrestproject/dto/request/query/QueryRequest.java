@@ -16,6 +16,6 @@ public record QueryRequest(
 
     public record Sort(
             String column,
-            String direction
+            ALLOWED_DIRECTIONS direction
     ) {}
 }

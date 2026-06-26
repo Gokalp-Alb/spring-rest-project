@@ -10,5 +10,7 @@ public interface IUserService {
     UserRequest createUser(AppUser user, Long userId);
     Page<UserResponse> getAllUsers(Pageable pageable);
     UserRequest getUserById(Long id);
+    UserRequest getUserByName(String name);
     void deleteUserById(Long id, Long userId);
+    AppUser findByUsername(String username);
 }

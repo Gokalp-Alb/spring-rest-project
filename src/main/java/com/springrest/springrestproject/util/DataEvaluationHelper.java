@@ -2,6 +2,7 @@ package com.springrest.springrestproject.util;
 
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.core.exception.FieldValidationError;
 import com.springrest.springrestproject.model.ColumnMetadata;
 import com.springrest.springrestproject.model.TableMetadata;
 import org.springframework.stereotype.Component;
@@ -60,14 +61,19 @@ public class DataEvaluationHelper {
             String columnName = col.getColumnName();
             if (rowData.containsKey(columnName) && rowData.get(columnName) != null) {
                 String valueStr = String.valueOf(rowData.get(columnName));
+
                 if (col.getColumnContext() != null && col.getColumnContext().getValidationRegex() != null) {
                     String regex = col.getColumnContext().getValidationRegex();
                     Pattern pattern = Pattern.compile(regex);
                     Matcher matcher = pattern.matcher(valueStr);
+
                     if (!matcher.matches()) {
+                        String reason = String.format("regex invalid, expected regex = {%s}", regex);
                         throw new ApplicationException(
-                                ErrorCode.BAD_REQUEST,
-                                String.format("Validation failed for column '%s'. Value does not match required pattern.", columnName)
+                                ErrorCode.INVALID_REGEX_PATTERN,
+                                List.of(new FieldValidationError(columnName, reason)),
+                                columnName,
+                                reason
                         );
                     }
                 }

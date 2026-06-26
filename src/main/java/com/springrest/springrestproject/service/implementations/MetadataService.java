@@ -94,6 +94,13 @@ public class MetadataService implements IMetadataService {
     }
 
     @Override
+    public TableResponse getTableByName(String tableId) {
+        TableMetadata metadata = tableMetadataRepo.findByName(tableId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+        return tableMapper.toResponse(metadata);
+    }
+
+    @Override
     @Transactional
     public TableResponse deleteTableByName(String tableName, Long userId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)

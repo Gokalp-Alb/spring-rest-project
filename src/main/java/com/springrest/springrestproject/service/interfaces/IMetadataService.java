@@ -13,4 +13,5 @@ public interface IMetadataService {
     TableResponse getTableById(Long tableId);
     TableResponse deleteTableByName(String tableName, Long userId);
     void logSchemaChange(String tableName, String sql, Long userId);
+    TableResponse getTableByName(String tableId);
 }
