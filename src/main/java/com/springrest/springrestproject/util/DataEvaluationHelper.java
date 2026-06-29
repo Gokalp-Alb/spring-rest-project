@@ -80,4 +80,133 @@ public class DataEvaluationHelper {
             }
         }
     }
+
+    public boolean isLogQuery(com.springrest.springrestproject.dto.request.query.QueryRequest request) {
+        if (request.conditions() == null) {
+            return false;
+        }
+        for (com.springrest.springrestproject.dto.request.query.QueryRequest.Condition condition : request.conditions()) {
+            if (condition.operator() != null && condition.operator().isLogQueryOperator()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final java.time.format.DateTimeFormatter TIMESTAMP_FORMATTER =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    public Object parseIfDateTime(Object value) {
+        if (value instanceof String str) {
+            str = str.trim();
+            if (str.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")) {
+                try {
+                    return java.time.LocalDateTime.parse(str, TIMESTAMP_FORMATTER);
+                } catch (Exception ignored) {}
+            }
+            if (str.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+                try {
+                    return java.time.LocalDate.parse(str);
+                } catch (Exception ignored) {}
+            }
+        }
+        return value;
+    }
+
+    public void validateRowDates(TableMetadata metadata, Map<String, Object> rowData) {
+        for (ColumnMetadata col : metadata.getColumns()) {
+            String columnName = col.getColumnName();
+            if (rowData.containsKey(columnName) && rowData.get(columnName) != null) {
+                String valueStr = String.valueOf(rowData.get(columnName));
+                String dataType = col.getDataType().toUpperCase();
+
+                if (dataType.contains("DATE") || dataType.contains("TIMESTAMP")) {
+                    boolean valid = false;
+                    String expectedFormatMessage = "yyyy-MM-dd or yyyy-MM-dd HH:mm:ss";
+
+                    if (valueStr.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+                        try {
+                            java.time.LocalDate.parse(valueStr);
+                            valid = true;
+                        } catch (Exception ignored) {}
+                    } else if (valueStr.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")) {
+                        try {
+                            java.time.LocalDateTime.parse(valueStr, TIMESTAMP_FORMATTER);
+                            valid = true;
+                        } catch (Exception ignored) {}
+                    }
+
+                    if (!valid) {
+                        String reason = String.format("invalid date/time, expected format = {%s}", expectedFormatMessage);
+                        throw new ApplicationException(
+                                ErrorCode.INVALID_DATE_FORMAT,
+                                List.of(new FieldValidationError(columnName, reason)),
+                                columnName,
+                                valueStr,
+                                expectedFormatMessage
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    public void validateQueryDates(com.springrest.springrestproject.dto.request.query.QueryRequest request) {
+        if (request.conditions() == null) {
+            return;
+        }
+        for (com.springrest.springrestproject.dto.request.query.QueryRequest.Condition condition : request.conditions()) {
+            if ("executed_at".equalsIgnoreCase(condition.column())) {
+                validateQueryValue(condition.column(), condition.value());
+            }
+        }
+    }
+
+    private void validateQueryValue(String column, Object value) {
+        if (value instanceof List<?> list) {
+            for (Object val : list) {
+                validateSingleQueryValue(column, val);
+            }
+        } else if (value instanceof Object[] arr) {
+            for (Object val : arr) {
+                validateSingleQueryValue(column, val);
+            }
+        } else {
+            String valStr = String.valueOf(value);
+            if (valStr.contains(",")) {
+                String[] parts = valStr.split(",");
+                for (String part : parts) {
+                    validateSingleQueryValue(column, part.trim());
+                }
+            } else {
+                validateSingleQueryValue(column, value);
+            }
+        }
+    }
+
+    private void validateSingleQueryValue(String column, Object value) {
+        String valueStr = String.valueOf(value);
+        if (!valueStr.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")) {
+            String reason = String.format("timestamp invalid, expected format = {%s}", "yyyy-MM-dd HH:mm:ss");
+            throw new ApplicationException(
+                    ErrorCode.INVALID_DATE_FORMAT,
+                    List.of(new FieldValidationError(column, reason)),
+                    column,
+                    valueStr,
+                    "yyyy-MM-dd HH:mm:ss"
+            );
+        }
+        try {
+            java.time.LocalDateTime.parse(valueStr, TIMESTAMP_FORMATTER);
+        } catch (Exception e) {
+            String reason = String.format("timestamp invalid, expected format = {%s}", "yyyy-MM-dd HH:mm:ss");
+            throw new ApplicationException(
+                    ErrorCode.INVALID_DATE_FORMAT,
+                    List.of(new FieldValidationError(column, reason)),
+                    column,
+                    valueStr,
+                    "yyyy-MM-dd HH:mm:ss"
+            );
+        }
+    }
 }

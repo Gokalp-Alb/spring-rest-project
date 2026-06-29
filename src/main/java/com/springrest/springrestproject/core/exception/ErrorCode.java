@@ -15,7 +15,9 @@ public enum ErrorCode {
     DUPLICATE_RESOURCE(HttpStatus.CONFLICT, "error.duplicate_resource"),
     DUPLICATE_TABLE_NAME(HttpStatus.CONFLICT, "error.duplicate_table_name"),
     INVALID_OPERATOR(HttpStatus.BAD_REQUEST, "error.invalid_operator"),
-    INVALID_SORT(HttpStatus.BAD_REQUEST, "error.invalid_sort");
+    INVALID_SORT(HttpStatus.BAD_REQUEST, "error.invalid_sort"),
+    LOG_TABLE_NOT_FOUND(HttpStatus.NOT_FOUND, "error.log_table_not_found"),
+    INVALID_DATE_FORMAT(HttpStatus.BAD_REQUEST, "error.invalid_date_format");
 
     private final HttpStatus httpStatus;
     private final String messageKey;

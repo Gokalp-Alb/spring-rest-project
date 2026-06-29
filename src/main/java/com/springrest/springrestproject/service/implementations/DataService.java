@@ -3,6 +3,7 @@ package com.springrest.springrestproject.service.implementations;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
+import com.springrest.springrestproject.dto.request.query.ALLOWED_OPERATORS;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.dto.request.table.AuditRequest;
@@ -47,6 +48,7 @@ public class DataService implements IDataService {
         TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         dataHelper.validateRowRegex(metadata, request.rowData());
+        dataHelper.validateRowDates(metadata, request.rowData());
 
         if (metadata.getTableContext() != null) {
             metadata.getTableContext().setLastUpdaterId(userId);
@@ -89,24 +91,154 @@ public class DataService implements IDataService {
 
     @Override
     public List<Map<String, Object>> executeSelect(QueryRequest request, Long userId, Pageable pageable) {
-        userRepo.findById(userId)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST));
+        if (userId != null && userId != 0L) {
+            userRepo.findById(userId)
+                    .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST));
+        }
+        dataHelper.validateQueryDates(request);
+
+        boolean useLogTable = dataHelper.isLogQuery(request);
+
+        String targetTable = request.tableName();
+        java.time.LocalDateTime tableCreatedDate = null;
+        List<Long> existingIds = null;
+        if (useLogTable) {
+            if (!targetTable.toLowerCase().endsWith("_log")) {
+                targetTable = targetTable + "_log";
+            }
+            if (!logTableExists(targetTable)) {
+                throw new ApplicationException(ErrorCode.LOG_TABLE_NOT_FOUND, request.tableName());
+            }
+            TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
+                    .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+            if (metadata.getTableContext() != null && metadata.getTableContext().getCreatedDate() != null) {
+                tableCreatedDate = metadata.getTableContext().getCreatedDate();
+            }
+
+            // 1. Retrieve log IDs matching criteria and operation_type in (POST, PUT)
+            StringBuilder idQueryBuilder = new StringBuilder(String.format(
+                "SELECT DISTINCT id FROM %s WHERE executed_at >= ?", targetTable));
+            List<Object> idQueryParams = new ArrayList<>();
+            idQueryParams.add(tableCreatedDate);
+
+            if (request.conditions() != null && !request.conditions().isEmpty()) {
+                for (QueryRequest.Condition condition : request.conditions()) {
+                    idQueryBuilder.append(" AND ");
+                    ALLOWED_OPERATORS op = condition.operator();
+                    if (op == ALLOWED_OPERATORS.BETWEEN) {
+                        idQueryBuilder.append(String.format("%s BETWEEN ? AND ?", condition.column()));
+                        if (condition.value() instanceof List<?> list && list.size() >= 2) {
+                            idQueryParams.add(dataHelper.parseIfDateTime(list.get(0)));
+                            idQueryParams.add(dataHelper.parseIfDateTime(list.get(1)));
+                        } else if (condition.value() instanceof Object[] arr && arr.length >= 2) {
+                            idQueryParams.add(dataHelper.parseIfDateTime(arr[0]));
+                            idQueryParams.add(dataHelper.parseIfDateTime(arr[1]));
+                        } else {
+                            String valStr = String.valueOf(condition.value());
+                            if (valStr.contains(",")) {
+                                String[] parts = valStr.split(",");
+                                idQueryParams.add(dataHelper.parseIfDateTime(parts[0].trim()));
+                                idQueryParams.add(dataHelper.parseIfDateTime(parts[1].trim()));
+                            } else {
+                                idQueryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                                idQueryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                            }
+                        }
+                    } else if (op == ALLOWED_OPERATORS.BEFORE) {
+                        idQueryBuilder.append(String.format("%s < ?", condition.column()));
+                        idQueryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                    } else if (op == ALLOWED_OPERATORS.AFTER) {
+                        idQueryBuilder.append(String.format("%s > ?", condition.column()));
+                        idQueryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                    } else {
+                        idQueryBuilder.append(String.format("%s %s ?", condition.column(), op.getValue()));
+                        idQueryParams.add(condition.value());
+                    }
+                }
+            }
+            idQueryBuilder.append(" AND operation_type IN ('POST', 'PUT')");
+
+            List<Long> logIds = jdbcTemplate.queryForList(idQueryBuilder.toString(), Long.class, idQueryParams.toArray());
+
+            if (logIds.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            // 2. Check existence in the base table in a batch query
+            String placeholders = logIds.stream().map(id -> "?").collect(Collectors.joining(", "));
+            String checkSql = String.format("SELECT id FROM %s WHERE id IN (%s)", request.tableName(), placeholders);
+            existingIds = jdbcTemplate.queryForList(checkSql, Long.class, logIds.toArray());
+
+            if (existingIds.isEmpty()) {
+                return new ArrayList<>();
+            }
+        }
+
         String fieldsStr = (request.fields() == null || request.fields().isEmpty())
                 ? "*"
                 : String.join(", ", request.fields());
 
-        StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s FROM %s", fieldsStr, request.tableName()));
+        StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s FROM %s", fieldsStr, targetTable));
         List<Object> queryParams = new ArrayList<>();
 
-        if (request.conditions() != null && !request.conditions().isEmpty()) {
+        if ((request.conditions() != null && !request.conditions().isEmpty()) || tableCreatedDate != null || existingIds != null) {
             sqlBuilder.append(" WHERE ");
-            for (int i = 0; i < request.conditions().size(); i++) {
-                QueryRequest.Condition condition = request.conditions().get(i);
-                if (i > 0) {
+            int conditionCount = 0;
+            if (tableCreatedDate != null) {
+                sqlBuilder.append("executed_at >= ?");
+                queryParams.add(tableCreatedDate);
+                conditionCount++;
+            }
+
+            if (existingIds != null) {
+                if (conditionCount > 0) {
                     sqlBuilder.append(" AND ");
                 }
-                sqlBuilder.append(String.format("%s %s ?", condition.column(), condition.operator().getValue()));
-                queryParams.add(condition.value());
+                String placeholders = existingIds.stream().map(id -> "?").collect(Collectors.joining(", "));
+                sqlBuilder.append(String.format("id IN (%s)", placeholders));
+                queryParams.addAll(existingIds);
+                conditionCount++;
+            }
+
+            if (request.conditions() != null && !request.conditions().isEmpty()) {
+                for (int i = 0; i < request.conditions().size(); i++) {
+                    QueryRequest.Condition condition = request.conditions().get(i);
+                    if (conditionCount > 0) {
+                        sqlBuilder.append(" AND ");
+                    }
+                    
+                    ALLOWED_OPERATORS op = condition.operator();
+                    if (op == ALLOWED_OPERATORS.BETWEEN) {
+                        sqlBuilder.append(String.format("%s BETWEEN ? AND ?", condition.column()));
+                        if (condition.value() instanceof List<?> list && list.size() >= 2) {
+                            queryParams.add(dataHelper.parseIfDateTime(list.get(0)));
+                            queryParams.add(dataHelper.parseIfDateTime(list.get(1)));
+                        } else if (condition.value() instanceof Object[] arr && arr.length >= 2) {
+                            queryParams.add(dataHelper.parseIfDateTime(arr[0]));
+                            queryParams.add(dataHelper.parseIfDateTime(arr[1]));
+                        } else {
+                            String valStr = String.valueOf(condition.value());
+                            if (valStr.contains(",")) {
+                                String[] parts = valStr.split(",");
+                                queryParams.add(dataHelper.parseIfDateTime(parts[0].trim()));
+                                queryParams.add(dataHelper.parseIfDateTime(parts[1].trim()));
+                            } else {
+                                queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                                queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                            }
+                        }
+                    } else if (op == ALLOWED_OPERATORS.BEFORE) {
+                        sqlBuilder.append(String.format("%s < ?", condition.column()));
+                        queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                    } else if (op == ALLOWED_OPERATORS.AFTER) {
+                        sqlBuilder.append(String.format("%s > ?", condition.column()));
+                        queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                    } else {
+                        sqlBuilder.append(String.format("%s %s ?", condition.column(), op.getValue()));
+                        queryParams.add(condition.value());
+                    }
+                    conditionCount++;
+                }
             }
         }
 
@@ -121,11 +253,11 @@ public class DataService implements IDataService {
             }
         }
 
-            sqlBuilder.append(" LIMIT ? OFFSET ?");
-            queryParams.add(pageable.getPageSize());
-            queryParams.add(pageable.getOffset());
+        sqlBuilder.append(" LIMIT ? OFFSET ?");
+        queryParams.add(pageable.getPageSize());
+        queryParams.add(pageable.getOffset());
 
-            return jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
+        return jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
     }
 
 
@@ -209,6 +341,8 @@ public class DataService implements IDataService {
         if (updateData == null || updateData.isEmpty()) {
             throw new ApplicationException(ErrorCode.BAD_REQUEST);
         }
+        dataHelper.validateRowRegex(metadata, updateData);
+        dataHelper.validateRowDates(metadata, updateData);
         List<String> sets = new ArrayList<>();
         List<Object> values = new ArrayList<>();
         for (Map.Entry<String, Object> entry : updateData.entrySet()) {
@@ -310,6 +444,15 @@ public class DataService implements IDataService {
             String insertSql = String.format("INSERT INTO %s (%s) VALUES (%s);", logTableName, columnsSql, placeholdersSql);
 
             jdbcTemplate.update(insertSql, values.toArray());
+        }
+    }
+
+    private boolean logTableExists(String tableName) {
+        String sql = "SELECT EXISTS (SELECT FROM information_schema.tables WHERE LOWER(table_name) = ?)";
+        try {
+            return Boolean.TRUE.equals(jdbcTemplate.queryForObject(sql, Boolean.class, tableName.toLowerCase()));
+        } catch (Exception e) {
+            return false;
         }
     }
 
