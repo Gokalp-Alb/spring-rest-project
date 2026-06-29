@@ -1,5 +1,6 @@
-package com.springrest.springrestproject.model;
+package com.springrest.springrestproject.model.table;
 
+import com.springrest.springrestproject.model.column.ColumnMetadata;
 import lombok.*;
 import java.util.List;
 

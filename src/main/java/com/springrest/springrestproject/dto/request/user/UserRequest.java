@@ -1,6 +1,6 @@
 package com.springrest.springrestproject.dto.request.user;
 
-import com.springrest.springrestproject.model.Role;
+import com.springrest.springrestproject.model.user.Role;
 
 public record UserRequest(
         Long id,

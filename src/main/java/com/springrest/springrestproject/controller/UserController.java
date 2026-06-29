@@ -3,7 +3,7 @@ package com.springrest.springrestproject.controller;
 import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
-import com.springrest.springrestproject.model.AppUser;
+import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;

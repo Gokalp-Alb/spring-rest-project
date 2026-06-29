@@ -52,7 +52,11 @@ CREATE TABLE column_metadata (
                                  last_changed_date TIMESTAMP,
                                  is_sensitive BOOLEAN DEFAULT FALSE,
                                  is_unique BOOLEAN DEFAULT FALSE,
-                                 validation_regex VARCHAR(500)
+                                 validation_regex VARCHAR(500),
+                                 relation_type VARCHAR(50),
+                                 related_table VARCHAR(255),
+                                 related_column VARCHAR(255),
+                                 delete_policy VARCHAR(50)
 );
 
 
@@ -115,6 +119,10 @@ CREATE TABLE column_metadata_log (
     is_sensitive BOOLEAN,
     is_unique BOOLEAN,
     validation_regex VARCHAR(500),
+    relation_type VARCHAR(50),
+    related_table VARCHAR(255),
+    related_column VARCHAR(255),
+    delete_policy VARCHAR(50),
     operation_type VARCHAR(50),
     executed_at TIMESTAMP,
     user_id BIGINT

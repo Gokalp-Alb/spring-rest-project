@@ -1,6 +1,6 @@
 package com.springrest.springrestproject.dto.request.table;
 
-import com.springrest.springrestproject.model.TableMetadata;
+import com.springrest.springrestproject.model.table.TableMetadata;
 import lombok.Builder;
 
 import java.time.LocalDateTime;

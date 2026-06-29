@@ -1,4 +1,4 @@
-package com.springrest.springrestproject.model;
+package com.springrest.springrestproject.model.user;
 
 import lombok.*;
 

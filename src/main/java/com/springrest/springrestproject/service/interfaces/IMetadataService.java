@@ -2,7 +2,7 @@ package com.springrest.springrestproject.service.interfaces;
 
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
-import com.springrest.springrestproject.model.TableMetadata;
+import com.springrest.springrestproject.model.table.TableMetadata;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 

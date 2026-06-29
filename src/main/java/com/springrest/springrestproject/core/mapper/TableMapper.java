@@ -1,7 +1,7 @@
 package com.springrest.springrestproject.core.mapper;
 
 import com.springrest.springrestproject.dto.response.table.TableResponse;
-import com.springrest.springrestproject.model.TableMetadata;
+import com.springrest.springrestproject.model.table.TableMetadata;
 import org.springframework.stereotype.Component;
 
 @Component

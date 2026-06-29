@@ -1,11 +1,12 @@
-package com.springrest.springrestproject.service.implementations;
+package com.springrest.springrestproject.service.implementations.essential;
 
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.query.ALLOWED_OPERATORS;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
-import com.springrest.springrestproject.model.ColumnMetadata;
+import com.springrest.springrestproject.model.column.ColumnMetadata;
+import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -237,7 +238,7 @@ public class DataServiceLogQueryTest {
         dataService.insertRow(insertReq2, 0L);
 
         // Get 2nd table's creation time
-        com.springrest.springrestproject.model.TableMetadata metadata = 
+        TableMetadata metadata =
                 tableMetadataRepo.findByTableName(testTableName).orElseThrow();
         java.time.LocalDateTime tCreate2 = metadata.getTableContext().getCreatedDate();
         java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");

@@ -1,15 +1,12 @@
-package com.springrest.springrestproject.model;
+package com.springrest.springrestproject.model.table;
 
 import lombok.*;
 import java.time.LocalDateTime;
 
 @Data @Getter @Setter @NoArgsConstructor @AllArgsConstructor
-public class ColumnContext {
+public class TableContext {
     private Long creatorId;
     private LocalDateTime createdDate;
     private Long lastUpdaterId;
     private LocalDateTime lastChangedDate;
-    private Boolean isSensitive = false;
-    private Boolean isUnique = false;
-    private String validationRegex;
 }

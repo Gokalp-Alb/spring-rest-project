@@ -3,8 +3,8 @@ package com.springrest.springrestproject.util;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
-import com.springrest.springrestproject.model.ColumnMetadata;
-import com.springrest.springrestproject.model.TableMetadata;
+import com.springrest.springrestproject.model.column.ColumnMetadata;
+import com.springrest.springrestproject.model.table.TableMetadata;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;

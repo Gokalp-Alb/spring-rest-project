@@ -17,7 +17,10 @@ public enum ErrorCode {
     INVALID_OPERATOR(HttpStatus.BAD_REQUEST, "error.invalid_operator"),
     INVALID_SORT(HttpStatus.BAD_REQUEST, "error.invalid_sort"),
     LOG_TABLE_NOT_FOUND(HttpStatus.NOT_FOUND, "error.log_table_not_found"),
-    INVALID_DATE_FORMAT(HttpStatus.BAD_REQUEST, "error.invalid_date_format");
+    INVALID_DATE_FORMAT(HttpStatus.BAD_REQUEST, "error.invalid_date_format"),
+    INVALID_RELATION_TYPE(HttpStatus.BAD_REQUEST, "error.invalid_relation_type"),
+    INVALID_DELETE_POLICY(HttpStatus.BAD_REQUEST, "error.invalid_delete_policy"),
+    RELATION_RESTRICT(HttpStatus.BAD_REQUEST, "error.relation_restrict");
 
     private final HttpStatus httpStatus;
     private final String messageKey;

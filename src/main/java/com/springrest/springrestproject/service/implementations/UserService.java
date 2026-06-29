@@ -4,7 +4,7 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
-import com.springrest.springrestproject.model.AppUser;
+import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IUserService;

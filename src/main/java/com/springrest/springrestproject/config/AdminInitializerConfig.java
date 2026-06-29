@@ -1,7 +1,7 @@
 package com.springrest.springrestproject.config;
 
-import com.springrest.springrestproject.model.AppUser;
-import com.springrest.springrestproject.model.Role;
+import com.springrest.springrestproject.model.user.AppUser;
+import com.springrest.springrestproject.model.user.Role;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;

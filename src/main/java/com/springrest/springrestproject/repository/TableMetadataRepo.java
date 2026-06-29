@@ -1,9 +1,14 @@
 package com.springrest.springrestproject.repository;
 
-import com.springrest.springrestproject.model.ColumnMetadata;
-import com.springrest.springrestproject.model.TableMetadata;
+import com.springrest.springrestproject.model.column.ColumnContext;
+import com.springrest.springrestproject.model.column.ColumnMetadata;
+import com.springrest.springrestproject.model.column.DeletePolicy;
+import com.springrest.springrestproject.model.column.RelationType;
+import com.springrest.springrestproject.model.table.TableContext;
+import com.springrest.springrestproject.model.table.TableMetadata;
 import lombok.RequiredArgsConstructor;
 import org.jooq.DSLContext;
+import org.jooq.Record;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -14,10 +19,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import static jooq.generated.Tables.COLUMN_METADATA;
-import static jooq.generated.Tables.TABLE_METADATA;
-import static jooq.generated.Tables.COLUMN_METADATA_LOG;
-import static jooq.generated.Tables.TABLE_METADATA_LOG;
+import static jooq.generated.Tables.*;
 
 @Repository
 @RequiredArgsConstructor
@@ -76,6 +78,10 @@ public class TableMetadataRepo {
                                 .set(COLUMN_METADATA.IS_SENSITIVE, colCtx != null ? colCtx.getIsSensitive() : false)
                                 .set(COLUMN_METADATA.IS_UNIQUE, colCtx != null ? colCtx.getIsUnique() : false)
                                 .set(COLUMN_METADATA.VALIDATION_REGEX, colCtx != null ? colCtx.getValidationRegex() : null)
+                                .set(COLUMN_METADATA.RELATION_TYPE, col.getRelationType() != null ? col.getRelationType().name() : null)
+                                .set(COLUMN_METADATA.RELATED_TABLE, col.getRelatedTable())
+                                .set(COLUMN_METADATA.RELATED_COLUMN, col.getRelatedColumn())
+                                .set(COLUMN_METADATA.DELETE_POLICY, col.getDeletePolicy() != null ? col.getDeletePolicy().name() : null)
                                 .returning(COLUMN_METADATA.ID)
                                 .fetchOne())
                         .getValue(COLUMN_METADATA.ID);
@@ -141,6 +147,10 @@ public class TableMetadataRepo {
                 .set(COLUMN_METADATA_LOG.IS_SENSITIVE, colCtx != null ? colCtx.getIsSensitive() : false)
                 .set(COLUMN_METADATA_LOG.IS_UNIQUE, colCtx != null ? colCtx.getIsUnique() : false)
                 .set(COLUMN_METADATA_LOG.VALIDATION_REGEX, colCtx != null ? colCtx.getValidationRegex() : null)
+                .set(COLUMN_METADATA_LOG.RELATION_TYPE, col.getRelationType() != null ? col.getRelationType().name() : null)
+                .set(COLUMN_METADATA_LOG.RELATED_TABLE, col.getRelatedTable())
+                .set(COLUMN_METADATA_LOG.RELATED_COLUMN, col.getRelatedColumn())
+                .set(COLUMN_METADATA_LOG.DELETE_POLICY, col.getDeletePolicy() != null ? col.getDeletePolicy().name() : null)
                 .set(COLUMN_METADATA_LOG.OPERATION_TYPE, operation)
                 .set(COLUMN_METADATA_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
                 .set(COLUMN_METADATA_LOG.USER_ID, executorId)
@@ -166,24 +176,7 @@ public class TableMetadataRepo {
     private List<ColumnMetadata> fetchColumnsForTable(Long tableId) {
         return dsl.selectFrom(COLUMN_METADATA)
                 .where(COLUMN_METADATA.TABLE_ID.eq(tableId))
-                .fetch(record -> {
-                    ColumnMetadata col = new ColumnMetadata();
-                    col.setId(record.get(COLUMN_METADATA.ID));
-                    col.setColumnName(record.get(COLUMN_METADATA.COLUMN_NAME));
-                    col.setDataType(record.get(COLUMN_METADATA.DATA_TYPE));
-
-                    var ctx = new com.springrest.springrestproject.model.ColumnContext();
-                    ctx.setCreatorId(record.get(COLUMN_METADATA.CREATOR_ID));
-                    ctx.setCreatedDate(record.get(COLUMN_METADATA.CREATED_DATE));
-                    ctx.setLastUpdaterId(record.get(COLUMN_METADATA.LAST_UPDATER_ID));
-                    ctx.setLastChangedDate(record.get(COLUMN_METADATA.LAST_CHANGED_DATE));
-                    ctx.setIsSensitive(record.get(COLUMN_METADATA.IS_SENSITIVE));
-                    ctx.setIsUnique(record.get(COLUMN_METADATA.IS_UNIQUE));
-                    ctx.setValidationRegex(record.get(COLUMN_METADATA.VALIDATION_REGEX));
-
-                    col.setColumnContext(ctx);
-                    return col;
-                });
+                .fetch(this::mapRecordToColumnMetadata);
     }
 
     public Optional<TableMetadata> findById(Long tableId) {
@@ -230,12 +223,65 @@ public class TableMetadataRepo {
                 .where(TABLE_METADATA.ID.eq(metadata.getId()))
                 .fetchOne();
         if (record != null) {
-            com.springrest.springrestproject.model.TableContext ctx = new com.springrest.springrestproject.model.TableContext();
+            TableContext ctx = new TableContext();
             ctx.setCreatorId(record.get(TABLE_METADATA.CREATOR_ID));
             ctx.setCreatedDate(record.get(TABLE_METADATA.CREATED_DATE));
             ctx.setLastUpdaterId(record.get(TABLE_METADATA.LAST_UPDATER_ID));
             ctx.setLastChangedDate(record.get(TABLE_METADATA.LAST_CHANGED_DATE));
             metadata.setTableContext(ctx);
         }
+    }
+
+
+    public List<ColumnMetadata> findColumnsPointingToTable(String tableName) {
+        return dsl.select(
+                    COLUMN_METADATA.ID,
+                    COLUMN_METADATA.COLUMN_NAME,
+                    COLUMN_METADATA.DATA_TYPE,
+                    COLUMN_METADATA.RELATION_TYPE,
+                    COLUMN_METADATA.RELATED_TABLE,
+                    COLUMN_METADATA.RELATED_COLUMN,
+                    COLUMN_METADATA.DELETE_POLICY,
+                    TABLE_METADATA.TABLE_NAME
+                )
+                .from(COLUMN_METADATA)
+                .join(TABLE_METADATA).on(COLUMN_METADATA.TABLE_ID.eq(TABLE_METADATA.ID))
+                .where(COLUMN_METADATA.RELATED_TABLE.equalIgnoreCase(tableName))
+                .fetch(record -> {
+                    ColumnMetadata col = mapRecordToColumnMetadata(record);
+                    col.setTableName(record.get(TABLE_METADATA.TABLE_NAME));
+                    return col;
+                });
+    }
+
+    private ColumnMetadata mapRecordToColumnMetadata(Record record) {
+        ColumnMetadata col = new ColumnMetadata();
+        col.setId(record.get(COLUMN_METADATA.ID));
+        col.setColumnName(record.get(COLUMN_METADATA.COLUMN_NAME));
+        col.setDataType(record.get(COLUMN_METADATA.DATA_TYPE));
+
+        try {
+            if (record.get(COLUMN_METADATA.CREATOR_ID) != null || record.get(COLUMN_METADATA.CREATED_DATE) != null) {
+                var ctx = new ColumnContext();
+                ctx.setCreatorId(record.get(COLUMN_METADATA.CREATOR_ID));
+                ctx.setCreatedDate(record.get(COLUMN_METADATA.CREATED_DATE));
+                ctx.setLastUpdaterId(record.get(COLUMN_METADATA.LAST_UPDATER_ID));
+                ctx.setLastChangedDate(record.get(COLUMN_METADATA.LAST_CHANGED_DATE));
+                ctx.setIsSensitive(record.get(COLUMN_METADATA.IS_SENSITIVE));
+                ctx.setIsUnique(record.get(COLUMN_METADATA.IS_UNIQUE));
+                ctx.setValidationRegex(record.get(COLUMN_METADATA.VALIDATION_REGEX));
+                col.setColumnContext(ctx);
+            }
+        } catch (IllegalArgumentException ignored) {
+        }
+
+        String relTypeStr = record.get(COLUMN_METADATA.RELATION_TYPE);
+        col.setRelationType(relTypeStr != null ? RelationType.valueOf(relTypeStr) : null);
+        col.setRelatedTable(record.get(COLUMN_METADATA.RELATED_TABLE));
+        col.setRelatedColumn(record.get(COLUMN_METADATA.RELATED_COLUMN));
+        String delPolicyStr = record.get(COLUMN_METADATA.DELETE_POLICY);
+        col.setDeletePolicy(delPolicyStr != null ? DeletePolicy.valueOf(delPolicyStr) : null);
+
+        return col;
     }
 }

@@ -2,7 +2,7 @@ package com.springrest.springrestproject.service.interfaces;
 
 import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
-import com.springrest.springrestproject.model.AppUser;
+import com.springrest.springrestproject.model.user.AppUser;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 

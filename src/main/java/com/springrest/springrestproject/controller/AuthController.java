@@ -10,7 +10,7 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.dto.request.user.LoginRequest;
-import com.springrest.springrestproject.model.AppUser;
+import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.service.implementations.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
