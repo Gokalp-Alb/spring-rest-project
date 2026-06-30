@@ -8,14 +8,13 @@ import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.model.SystemDdlLog;
 import com.springrest.springrestproject.model.column.ColumnContext;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
-import com.springrest.springrestproject.model.column.DeletePolicy;
-import com.springrest.springrestproject.model.column.RelationType;
+import com.springrest.springrestproject.model.relation.DeletePolicy;
+import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableContext;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.SystemDdlLogRepo;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
-import com.springrest.springrestproject.validators.ColumnRelationValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -34,10 +33,9 @@ import java.util.stream.Collectors;
 public class MetadataService implements IMetadataService {
 
     private final TableMetadataRepo tableMetadataRepo;
-    private final SystemDdlLogRepo ddlLogRepo;
     private final JdbcTemplate jdbcTemplate;
+    private final SystemDdlLogRepo ddlLogRepo;
     private final TableMapper tableMapper;
-    private final ColumnRelationValidator columnRelationValidator;
 
     @Override
     @Transactional
@@ -46,33 +44,20 @@ public class MetadataService implements IMetadataService {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
         }
 
-        columnRelationValidator.validate(request.columns());
-
         List<String> colDefs = new ArrayList<>();
-        List<String> constraintDefs = new ArrayList<>();
 
         for (ColumnMetadata col : request.columns()) {
             String columnDef = col.getColumnName() + " " + col.getDataType();
-            if (col.getRelationType() == RelationType.ONE_TO_ONE) {
+            if (col.getColumnContext() != null && col.getColumnContext().getIsUnique()) {
                 columnDef += " UNIQUE";
-                String targetColName = col.getRelatedColumn() != null ? col.getRelatedColumn() : "id";
-                DeletePolicy policy = col.getDeletePolicy() != null ? col.getDeletePolicy() : DeletePolicy.CASCADE;
-                constraintDefs.add(String.format("CONSTRAINT fk_%s_%s FOREIGN KEY (%s) REFERENCES %s(%s) %s",
-                        tableName, col.getColumnName(), col.getColumnName(), col.getRelatedTable(), targetColName, policy.getSql()));
-            } else {
-                if (col.getColumnContext() != null && col.getColumnContext().getIsUnique()) {
-                    columnDef += " UNIQUE";
-                }
             }
             colDefs.add(columnDef);
         }
 
         String columnsSql = String.join(", ", colDefs);
-        if (!constraintDefs.isEmpty()) {
-            columnsSql += ", " + String.join(", ", constraintDefs);
-        }
-        String createTableSql = String.format("CREATE TABLE IF NOT EXISTS %s (id SERIAL PRIMARY KEY, %s);",
-                tableName, columnsSql);
+        String additionalColumns = columnsSql.isEmpty() ? "" : ", " + columnsSql;
+        String createTableSql = String.format("CREATE TABLE IF NOT EXISTS %s (id SERIAL PRIMARY KEY%s);",
+                tableName, additionalColumns);
         logSchemaChange(tableName, createTableSql, userId);
         jdbcTemplate.execute(createTableSql);
 
@@ -92,25 +77,25 @@ public class MetadataService implements IMetadataService {
 
         TableContext tableContext = new TableContext();
         tableContext.setCreatorId(userId);
-        tableContext.setCreatedDate(java.time.LocalDateTime.now());
+        tableContext.setCreatedDate(LocalDateTime.now());
         tableContext.setLastUpdaterId(userId);
-        tableContext.setLastChangedDate(java.time.LocalDateTime.now());
+        tableContext.setLastChangedDate(LocalDateTime.now());
 
         List<ColumnMetadata> domainColumns = request.columns().stream().map(srcCol -> {
             ColumnMetadata targetCol = new ColumnMetadata();
             targetCol.setColumnName(srcCol.getColumnName());
             targetCol.setDataType(srcCol.getDataType());
-            targetCol.setRelationType(srcCol.getRelationType());
-            targetCol.setRelatedTable(srcCol.getRelatedTable());
-            targetCol.setRelatedColumn(srcCol.getRelatedColumn() != null ? srcCol.getRelatedColumn() : "id");
-            targetCol.setDeletePolicy(srcCol.getDeletePolicy() != null ? srcCol.getDeletePolicy() : DeletePolicy.CASCADE);
+            targetCol.setRelationType(null); // Ignore any relation mapping
+            targetCol.setRelatedTable(null);
+            targetCol.setRelatedColumn(null);
+            targetCol.setDeletePolicy(null);
 
             ColumnContext srcCtx = srcCol.getColumnContext();
             ColumnContext targetCtx = new ColumnContext();
             targetCtx.setCreatorId(userId);
-            targetCtx.setCreatedDate(java.time.LocalDateTime.now());
+            targetCtx.setCreatedDate(LocalDateTime.now());
             targetCtx.setLastUpdaterId(userId);
-            targetCtx.setLastChangedDate(java.time.LocalDateTime.now());
+            targetCtx.setLastChangedDate(LocalDateTime.now());
             targetCtx.setIsSensitive(srcCtx != null && srcCtx.getIsSensitive() != null ? srcCtx.getIsSensitive() : false);
             targetCtx.setIsUnique(srcCtx != null && srcCtx.getIsUnique() != null ? srcCtx.getIsUnique() : false);
             targetCtx.setValidationRegex(srcCtx != null ? srcCtx.getValidationRegex() : null);
@@ -157,32 +142,49 @@ public class MetadataService implements IMetadataService {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
 
-        List<ColumnMetadata> incomingFKs = tableMetadataRepo.findColumnsPointingToTable(tableName);
+        List<ColumnMetadata> referencingColumns = tableMetadataRepo.findColumnsPointingToTable(tableName);
 
         boolean useCascade = false;
-        for (ColumnMetadata fkCol : incomingFKs) {
+        
+        for (ColumnMetadata fkCol : referencingColumns) {
+            TableMetadata parentTable = tableMetadataRepo.findByTableName(fkCol.getTableName())
+                    .orElse(null);
+                    
+            boolean isJunction = parentTable != null && parentTable.getColumns() != null 
+                                 && parentTable.getColumns().size() == 2 
+                                 && parentTable.getColumns().stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+                                 
             DeletePolicy policy = fkCol.getDeletePolicy() != null ? fkCol.getDeletePolicy() : DeletePolicy.CASCADE;
-            switch (policy) {
-                case CASCADE -> useCascade = true;
+            
+            if (policy == DeletePolicy.RESTRICT || policy == DeletePolicy.NO_ACTION) {
+                throw new ApplicationException(ErrorCode.RELATION_RESTRICT, fkCol.getTableName());
+            }
 
-                case RESTRICT, NO_ACTION -> throw new ApplicationException(
-                            ErrorCode.RELATION_RESTRICT,
-                            fkCol.getTableName()
-                    );
+            if (isJunction) {
+                String dropJunctionSql = String.format("DROP TABLE IF EXISTS %s CASCADE;", fkCol.getTableName());
+                logSchemaChange(fkCol.getTableName(), dropJunctionSql, userId);
+                jdbcTemplate.execute(dropJunctionSql);
+                
+                tableMetadataRepo.findByTableName(fkCol.getTableName()).ifPresent(tableMetadataRepo::delete);
+            } else {
+                String dropColSql = String.format("ALTER TABLE %s DROP COLUMN IF EXISTS %s CASCADE;",
+                        fkCol.getTableName(), fkCol.getColumnName());
+                logSchemaChange(fkCol.getTableName(), dropColSql, userId);
+                jdbcTemplate.execute(dropColSql);
 
-                case SET_NULL -> {
-                    String constraintName = String.format("fk_%s_%s", fkCol.getTableName(), fkCol.getColumnName());
-
-                    String dropConstraintSql = String.format("ALTER TABLE %s DROP CONSTRAINT IF EXISTS %s;",
-                            fkCol.getTableName(), constraintName);
-                    logSchemaChange(fkCol.getTableName(), dropConstraintSql, userId);
-                    jdbcTemplate.execute(dropConstraintSql);
-
-                    // Nullify column dynamically
-                    String nullifySql = String.format("UPDATE %s SET %s = NULL;",
+                if (parentTable != null && Boolean.TRUE.equals(parentTable.getIsAuditEnabled())) {
+                    String dropLogColSql = String.format("ALTER TABLE %s_log DROP COLUMN IF EXISTS %s CASCADE;",
                             fkCol.getTableName(), fkCol.getColumnName());
-                    logSchemaChange(fkCol.getTableName(), nullifySql, userId);
-                    jdbcTemplate.execute(nullifySql);
+                    logSchemaChange(fkCol.getTableName() + "_log", dropLogColSql, userId);
+                    jdbcTemplate.execute(dropLogColSql);
+                }
+
+                if (parentTable != null) {
+                    parentTable.getColumns().removeIf(c -> c.getColumnName().equalsIgnoreCase(fkCol.getColumnName()));
+                    tableMetadataRepo.save(parentTable);
+                }
+                if (policy == DeletePolicy.CASCADE) {
+                    useCascade = true;
                 }
             }
         }
@@ -194,6 +196,7 @@ public class MetadataService implements IMetadataService {
         logSchemaChange(tableName, dropTableSql, userId);
         jdbcTemplate.execute(dropTableSql);
         tableMetadataRepo.delete(metadata);
+        
         return new TableResponse(
                 metadata.getId(),
                 tableName,

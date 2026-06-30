@@ -24,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -120,7 +121,7 @@ public class DataService implements IDataService {
             }
             TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
                     .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
-            java.time.LocalDateTime tableCreatedDate = null;
+            LocalDateTime tableCreatedDate = null;
             if (metadata.getTableContext() != null && metadata.getTableContext().getCreatedDate() != null) {
                 tableCreatedDate = metadata.getTableContext().getCreatedDate();
             }
@@ -290,7 +291,7 @@ public class DataService implements IDataService {
                     .recordId(id)
                     .rowData(beforeState)
                     .operationType("DELETE")
-                    .executedAt(java.time.LocalDateTime.now())
+                    .executedAt(LocalDateTime.now())
                     .userId(userId)
                     .build());
         }
@@ -357,7 +358,7 @@ public class DataService implements IDataService {
                         .recordId(id)
                         .rowData(rows.getFirst())
                         .operationType("PUT")
-                        .executedAt(java.time.LocalDateTime.now())
+                        .executedAt(LocalDateTime.now())
                         .userId(userId)
                         .build());
             }

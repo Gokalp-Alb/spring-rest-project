@@ -1,11 +1,16 @@
-package com.springrest.springrestproject.model.column;
+package com.springrest.springrestproject.model.relation;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 public enum RelationType {
-    ONE_TO_ONE;
+    ONE_TO_ONE,
+    MANY_TO_ONE,
+    MANY_TO_MANY;
 
     @JsonCreator
     public static RelationType fromValue(String text) {
@@ -18,9 +23,9 @@ public enum RelationType {
                 return type;
             }
         }
-        String allowed = java.util.Arrays.stream(RelationType.values())
+        String allowed = Arrays.stream(RelationType.values())
                 .map(RelationType::name)
-                .collect(java.util.stream.Collectors.joining(", "));
+                .collect(Collectors.joining(", "));
         throw new ApplicationException(ErrorCode.INVALID_RELATION_TYPE, text, allowed);
     }
 }

@@ -1,5 +1,7 @@
 package com.springrest.springrestproject.model.column;
 
+import com.springrest.springrestproject.model.relation.DeletePolicy;
+import com.springrest.springrestproject.model.relation.RelationType;
 import lombok.*;
 
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor

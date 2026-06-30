@@ -1,4 +1,4 @@
-package com.springrest.springrestproject.model.column;
+package com.springrest.springrestproject.model.relation;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.springrest.springrestproject.core.exception.ApplicationException;

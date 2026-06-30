@@ -4,6 +4,7 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
+import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
 import org.springframework.stereotype.Component;
@@ -64,7 +65,7 @@ public class ColumnRelationValidator {
                     );
                 });
 
-        if (!isUnique(referencedCol)) {
+        if (col.getRelationType() == RelationType.ONE_TO_ONE && !isUnique(referencedCol)) {
             String reason = "cannot create relation to a non unique column";
             throw new ApplicationException(
                     ErrorCode.BAD_REQUEST,

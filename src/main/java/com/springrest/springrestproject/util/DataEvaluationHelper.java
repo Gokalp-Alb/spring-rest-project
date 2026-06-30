@@ -3,10 +3,15 @@ package com.springrest.springrestproject.util;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
+import com.springrest.springrestproject.dto.request.query.QueryRequest;
+import com.springrest.springrestproject.dto.request.query.QueryRequest.Condition;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -81,11 +86,11 @@ public class DataEvaluationHelper {
         }
     }
 
-    public boolean isLogQuery(com.springrest.springrestproject.dto.request.query.QueryRequest request) {
+    public boolean isLogQuery(QueryRequest request) {
         if (request.conditions() == null) {
             return false;
         }
-        for (com.springrest.springrestproject.dto.request.query.QueryRequest.Condition condition : request.conditions()) {
+        for (Condition condition : request.conditions()) {
             if (condition.operator() != null && condition.operator().isLogQueryOperator()) {
                 return true;
             }
@@ -93,20 +98,20 @@ public class DataEvaluationHelper {
         return false;
     }
 
-    private static final java.time.format.DateTimeFormatter TIMESTAMP_FORMATTER =
-            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public Object parseIfDateTime(Object value) {
         if (value instanceof String str) {
             str = str.trim();
             if (str.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")) {
                 try {
-                    return java.time.LocalDateTime.parse(str, TIMESTAMP_FORMATTER);
+                    return LocalDateTime.parse(str, TIMESTAMP_FORMATTER);
                 } catch (Exception ignored) {}
             }
             if (str.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
                 try {
-                    return java.time.LocalDate.parse(str);
+                    return LocalDate.parse(str);
                 } catch (Exception ignored) {}
             }
         }
@@ -126,12 +131,12 @@ public class DataEvaluationHelper {
 
                     if (valueStr.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
                         try {
-                            java.time.LocalDate.parse(valueStr);
+                            LocalDate.parse(valueStr);
                             valid = true;
                         } catch (Exception ignored) {}
                     } else if (valueStr.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")) {
                         try {
-                            java.time.LocalDateTime.parse(valueStr, TIMESTAMP_FORMATTER);
+                            LocalDateTime.parse(valueStr, TIMESTAMP_FORMATTER);
                             valid = true;
                         } catch (Exception ignored) {}
                     }
@@ -151,11 +156,11 @@ public class DataEvaluationHelper {
         }
     }
 
-    public void validateQueryDates(com.springrest.springrestproject.dto.request.query.QueryRequest request) {
+    public void validateQueryDates(QueryRequest request) {
         if (request.conditions() == null) {
             return;
         }
-        for (com.springrest.springrestproject.dto.request.query.QueryRequest.Condition condition : request.conditions()) {
+        for (Condition condition : request.conditions()) {
             if ("executed_at".equalsIgnoreCase(condition.column())) {
                 validateQueryValue(condition.column(), condition.value());
             }
@@ -187,26 +192,23 @@ public class DataEvaluationHelper {
     private void validateSingleQueryValue(String column, Object value) {
         String valueStr = String.valueOf(value);
         if (!valueStr.matches("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")) {
-            String reason = String.format("timestamp invalid, expected format = {%s}", "yyyy-MM-dd HH:mm:ss");
-            throw new ApplicationException(
-                    ErrorCode.INVALID_DATE_FORMAT,
-                    List.of(new FieldValidationError(column, reason)),
-                    column,
-                    valueStr,
-                    "yyyy-MM-dd HH:mm:ss"
-            );
+            throwInvalidDateFormatException(column, valueStr);
         }
         try {
-            java.time.LocalDateTime.parse(valueStr, TIMESTAMP_FORMATTER);
+            LocalDateTime.parse(valueStr, TIMESTAMP_FORMATTER);
         } catch (Exception e) {
-            String reason = String.format("timestamp invalid, expected format = {%s}", "yyyy-MM-dd HH:mm:ss");
-            throw new ApplicationException(
-                    ErrorCode.INVALID_DATE_FORMAT,
-                    List.of(new FieldValidationError(column, reason)),
-                    column,
-                    valueStr,
-                    "yyyy-MM-dd HH:mm:ss"
-            );
+            throwInvalidDateFormatException(column, valueStr);
         }
+    }
+
+    private void throwInvalidDateFormatException(String column, String valueStr) {
+        String reason = String.format("timestamp invalid, expected format = {%s}", "yyyy-MM-dd HH:mm:ss");
+        throw new ApplicationException(
+                ErrorCode.INVALID_DATE_FORMAT,
+                List.of(new FieldValidationError(column, reason)),
+                column,
+                valueStr,
+                "yyyy-MM-dd HH:mm:ss"
+        );
     }
 }

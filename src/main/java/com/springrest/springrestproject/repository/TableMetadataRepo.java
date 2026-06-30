@@ -2,8 +2,8 @@ package com.springrest.springrestproject.repository;
 
 import com.springrest.springrestproject.model.column.ColumnContext;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
-import com.springrest.springrestproject.model.column.DeletePolicy;
-import com.springrest.springrestproject.model.column.RelationType;
+import com.springrest.springrestproject.model.relation.DeletePolicy;
+import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableContext;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -34,9 +35,9 @@ public class TableMetadataRepo {
             Long generatedId = Objects.requireNonNull(dsl.insertInto(TABLE_METADATA)
                             .set(TABLE_METADATA.TABLE_NAME, metadata.getTableName())
                             .set(TABLE_METADATA.CREATOR_ID, tableCtx != null ? tableCtx.getCreatorId() : null)
-                            .set(TABLE_METADATA.CREATED_DATE, tableCtx != null ? tableCtx.getCreatedDate() : java.time.LocalDateTime.now())
+                            .set(TABLE_METADATA.CREATED_DATE, tableCtx != null ? tableCtx.getCreatedDate() : LocalDateTime.now())
                             .set(TABLE_METADATA.LAST_UPDATER_ID, tableCtx != null ? tableCtx.getLastUpdaterId() : null)
-                            .set(TABLE_METADATA.LAST_CHANGED_DATE, tableCtx != null ? tableCtx.getLastChangedDate() : java.time.LocalDateTime.now())
+                            .set(TABLE_METADATA.LAST_CHANGED_DATE, tableCtx != null ? tableCtx.getLastChangedDate() : LocalDateTime.now())
                             .set(TABLE_METADATA.IS_AUDIT_ENABLED, metadata.getIsAuditEnabled() != null ? metadata.getIsAuditEnabled() : false)
                             .returning(TABLE_METADATA.ID)
                             .fetchOne())
@@ -54,7 +55,7 @@ public class TableMetadataRepo {
             dsl.update(TABLE_METADATA)
                     .set(TABLE_METADATA.TABLE_NAME, metadata.getTableName())
                     .set(TABLE_METADATA.LAST_UPDATER_ID, tableCtx != null ? tableCtx.getLastUpdaterId() : null)
-                    .set(TABLE_METADATA.LAST_CHANGED_DATE, tableCtx != null ? tableCtx.getLastChangedDate() : java.time.LocalDateTime.now())
+                    .set(TABLE_METADATA.LAST_CHANGED_DATE, tableCtx != null ? tableCtx.getLastChangedDate() : LocalDateTime.now())
                     .set(TABLE_METADATA.IS_AUDIT_ENABLED, metadata.getIsAuditEnabled() != null ? metadata.getIsAuditEnabled() : false)
                     .where(TABLE_METADATA.ID.eq(metadata.getId()))
                     .execute();
@@ -72,9 +73,9 @@ public class TableMetadataRepo {
                                 .set(COLUMN_METADATA.COLUMN_NAME, col.getColumnName())
                                 .set(COLUMN_METADATA.DATA_TYPE, col.getDataType())
                                 .set(COLUMN_METADATA.CREATOR_ID, colCtx != null ? colCtx.getCreatorId() : null)
-                                .set(COLUMN_METADATA.CREATED_DATE, colCtx != null ? colCtx.getCreatedDate() : java.time.LocalDateTime.now())
+                                .set(COLUMN_METADATA.CREATED_DATE, colCtx != null ? colCtx.getCreatedDate() : LocalDateTime.now())
                                 .set(COLUMN_METADATA.LAST_UPDATER_ID, colCtx != null ? colCtx.getLastUpdaterId() : null)
-                                .set(COLUMN_METADATA.LAST_CHANGED_DATE, colCtx != null ? colCtx.getLastChangedDate() : java.time.LocalDateTime.now())
+                                .set(COLUMN_METADATA.LAST_CHANGED_DATE, colCtx != null ? colCtx.getLastChangedDate() : LocalDateTime.now())
                                 .set(COLUMN_METADATA.IS_SENSITIVE, colCtx != null ? colCtx.getIsSensitive() : false)
                                 .set(COLUMN_METADATA.IS_UNIQUE, colCtx != null ? colCtx.getIsUnique() : false)
                                 .set(COLUMN_METADATA.VALIDATION_REGEX, colCtx != null ? colCtx.getValidationRegex() : null)
