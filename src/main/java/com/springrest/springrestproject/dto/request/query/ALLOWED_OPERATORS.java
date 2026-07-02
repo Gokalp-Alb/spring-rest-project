@@ -9,20 +9,19 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @Getter
 public enum ALLOWED_OPERATORS {
-    EQUALS("=", false),
-    NOT_EQUALS("!=", false),
-    GREATER_THAN(">", false),
-    LESS_THAN("<", false),
-    GREATER_THAN_OR_EQUAL(">=", false),
-    LESS_THAN_OR_EQUAL("<=", false),
-    LIKE("LIKE", false),
-    NOT_LIKE("NOT LIKE", false),
-    BETWEEN("BETWEEN", true),
-    BEFORE("BEFORE", true),
-    AFTER("AFTER", true);
+    EQUALS("="),
+    NOT_EQUALS("!="),
+    GREATER_THAN(">"),
+    LESS_THAN("<"),
+    GREATER_THAN_OR_EQUAL(">="),
+    LESS_THAN_OR_EQUAL("<="),
+    LIKE("LIKE"),
+    NOT_LIKE("NOT LIKE"),
+    BETWEEN("BETWEEN"),
+    BEFORE("BEFORE"),
+    AFTER("AFTER");
 
     private final String value;
-    private final boolean logQueryOperator;
 
     @JsonCreator
     public static ALLOWED_OPERATORS fromValue(String text) {

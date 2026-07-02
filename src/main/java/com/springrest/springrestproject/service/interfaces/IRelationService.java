@@ -4,6 +4,8 @@ import com.springrest.springrestproject.dto.request.relation.DirectRelationReque
 import com.springrest.springrestproject.dto.request.relation.ManyToManyRelationRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyInsertRequest;
 import com.springrest.springrestproject.dto.response.relation.RelationResponse;
+import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
+import java.util.List;
 
 public interface IRelationService {
     RelationResponse createOneToOneRelation(DirectRelationRequest request, Long userId);
@@ -15,4 +17,7 @@ public interface IRelationService {
 
     void deleteManyToManyDataById(Long relationId, ManyToManyInsertRequest request);
     void deleteManyToManyDataByName(String tableName, ManyToManyInsertRequest request);
+
+    List<RelationResponse> getAllRelations();
+    List<ResolvedRelation> getRelationsForTable(String tableName);
 }

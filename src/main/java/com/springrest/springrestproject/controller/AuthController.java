@@ -44,7 +44,7 @@ public class AuthController {
                 .subject(user.getUsername())
                 .issuer("com.springrest.project")
                 .issueTime(new Date())
-                .expirationTime(new Date(new Date().getTime() + 3600000)) // 1 hour lifetime
+                .expirationTime(new Date(new Date().getTime() + 86400000)) // 24 hours lifetime
                 .claim("userId", user.getId())
                 .claim("roles", "ROLE_" + user.getRole().name())
                 .build();

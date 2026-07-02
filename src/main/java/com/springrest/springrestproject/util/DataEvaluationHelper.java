@@ -3,6 +3,7 @@ package com.springrest.springrestproject.util;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
+import com.springrest.springrestproject.dto.request.query.ALLOWED_OPERATION_TYPES;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest.Condition;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
@@ -86,18 +87,6 @@ public class DataEvaluationHelper {
         }
     }
 
-    public boolean isLogQuery(QueryRequest request) {
-        if (request.conditions() == null) {
-            return false;
-        }
-        for (Condition condition : request.conditions()) {
-            if (condition.operator() != null && condition.operator().isLogQueryOperator()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -157,12 +146,20 @@ public class DataEvaluationHelper {
     }
 
     public void validateQueryDates(QueryRequest request) {
-        if (request.conditions() == null) {
-            return;
+        if (request.conditions() != null) {
+            for (Condition condition : request.conditions()) {
+                if ("executed_at".equalsIgnoreCase(condition.column()) || 
+                    "created_date".equalsIgnoreCase(condition.column()) || 
+                    "last_changed_date".equalsIgnoreCase(condition.column())) {
+                    validateQueryValue(condition.column(), condition.value());
+                }
+            }
         }
-        for (Condition condition : request.conditions()) {
-            if ("executed_at".equalsIgnoreCase(condition.column())) {
-                validateQueryValue(condition.column(), condition.value());
+        if (request.audit() != null) {
+            for (Condition condition : request.audit()) {
+                if ("executed_at".equalsIgnoreCase(condition.column())) {
+                    validateQueryValue(condition.column(), condition.value());
+                }
             }
         }
     }
@@ -210,5 +207,33 @@ public class DataEvaluationHelper {
                 valueStr,
                 "yyyy-MM-dd HH:mm:ss"
         );
+    }
+
+    public List<String> parseOperationTypes(String value) {
+        if (value == null) {
+            return List.of();
+        }
+        String trimmed = value.trim();
+        if ("*".equals(trimmed)) {
+            return java.util.Arrays.stream(ALLOWED_OPERATION_TYPES.values())
+                    .map(ALLOWED_OPERATION_TYPES::getValue)
+                    .toList();
+        }
+        String[] parts = trimmed.split(",");
+        List<String> mapped = new ArrayList<>();
+        for (String part : parts) {
+            String sanitized = part.trim().toUpperCase();
+            if ("CREATE".equals(sanitized)) {
+                mapped.add(ALLOWED_OPERATION_TYPES.POST.getValue());
+            } else {
+                try {
+                    ALLOWED_OPERATION_TYPES op = ALLOWED_OPERATION_TYPES.fromValue(sanitized);
+                    mapped.add(op.getValue());
+                } catch (ApplicationException e) {
+                    throw new ApplicationException(ErrorCode.INVALID_OPERATOR, part.trim(), "CREATE, PUT, DELETE");
+                }
+            }
+        }
+        return mapped;
     }
 }

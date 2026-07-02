@@ -7,13 +7,19 @@ import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.ALLOWED_OPERATORS;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.request.table.AuditRequest;
+import com.springrest.springrestproject.dto.response.data.AuditLogResponse;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
+import com.springrest.springrestproject.dto.response.data.QueryResponse;
+import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
+import com.springrest.springrestproject.model.column.SystemColumn;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.implementations.Kafka.OutboundKafkaPublisher;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
+import com.springrest.springrestproject.service.interfaces.IRelationService;
+import com.springrest.springrestproject.model.relation.RelationJoinType;
 import com.springrest.springrestproject.util.DataEvaluationHelper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -29,8 +35,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,6 +47,7 @@ public class DataService implements IDataService {
     private final TableMetadataRepo tableMetadataRepo;
     private final AppUserRepo userRepo;
     private final IMetadataService metadataService;
+    private final IRelationService relationService;
     private final DataEvaluationHelper dataHelper;
     private final OutboundKafkaPublisher kafkaPublisher;
 
@@ -59,8 +66,15 @@ public class DataService implements IDataService {
             metadata.getTableContext().setLastUpdaterId(userId);
         }
 
-        List<String> columns = new ArrayList<>(request.rowData().keySet());
-        List<Object> values = new ArrayList<>(request.rowData().values());
+        Map<String, Object> finalRowData = new HashMap<>(request.rowData());
+        SystemColumn sysCols = SystemColumn.defaults();
+        finalRowData.put(sysCols.creatorId().name(), userId);
+        finalRowData.put(sysCols.createdDate().name(), LocalDateTime.now());
+        finalRowData.put(sysCols.lastUpdaterId().name(), userId);
+        finalRowData.put(sysCols.lastChangedDate().name(), LocalDateTime.now());
+
+        List<String> columns = new ArrayList<>(finalRowData.keySet());
+        List<Object> values = new ArrayList<>(finalRowData.values());
 
         String columnsSql = String.join(", ", columns);
 
@@ -81,12 +95,12 @@ public class DataService implements IDataService {
             handleDataIntegrityViolation(e);
             throw e;
         }
-        kafkaPublisher.publishMutation(request.tableName(), "INSERT", request.rowData(), userId);
+        kafkaPublisher.publishMutation(request.tableName(), "INSERT", finalRowData, userId);
 
         auditLogMutation(AuditRequest.builder()
                 .tableMetadata(metadata)
                 .recordId(id)
-                .rowData(request.rowData())
+                .rowData(finalRowData)
                 .operationType("POST")
                 .executedAt(java.time.LocalDateTime.now())
                 .userId(userId)
@@ -96,56 +110,33 @@ public class DataService implements IDataService {
                 id,
                 request.tableName(),
                 "INSERT",
-                request.rowData()
+                finalRowData
         );
     }
 
     @Override
-    public List<Map<String, Object>> executeSelect(QueryRequest request, Long userId, Pageable pageable) {
-        // Validate user context
+    public QueryResponse executeSelect(QueryRequest request, Long userId, Pageable pageable) {
         if (userId != null && userId != 0L) {
             userRepo.findById(userId)
                     .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST));
         }
         dataHelper.validateQueryDates(request);
 
-        // Identify if log-based queries are requested
-        boolean useLogTable = dataHelper.isLogQuery(request);
-        List<Long> matchedIds = null;
+        List<Map<String, Object>> data = executeMainSelect(request, pageable);
 
-        // Fetch matching record IDs from log table
-        if (useLogTable) {
-            String logTableName = request.tableName() + "_log";
-            if (!logTableExists(logTableName)) {
-                throw new ApplicationException(ErrorCode.LOG_TABLE_NOT_FOUND, request.tableName());
-            }
-            TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
-                    .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
-            LocalDateTime tableCreatedDate = null;
-            if (metadata.getTableContext() != null && metadata.getTableContext().getCreatedDate() != null) {
-                tableCreatedDate = metadata.getTableContext().getCreatedDate();
-            }
-
-            StringBuilder idQueryBuilder = new StringBuilder(String.format(
-                "SELECT DISTINCT id FROM %s WHERE executed_at >= ?", logTableName));
-            List<Object> idQueryParams = new ArrayList<>();
-            idQueryParams.add(tableCreatedDate);
-
-            if (request.conditions() != null && !request.conditions().isEmpty()) {
-                for (QueryRequest.Condition condition : request.conditions()) {
-                    idQueryBuilder.append(" AND ");
-                    applyCondition(condition, idQueryBuilder, idQueryParams);
-                }
-            }
-            idQueryBuilder.append(" AND operation_type IN ('POST', 'PUT')");
-
-            matchedIds = jdbcTemplate.queryForList(idQueryBuilder.toString(), Long.class, idQueryParams.toArray());
-            if (matchedIds.isEmpty()) {
-                return new ArrayList<>();
-            }
+        if (request.relations() != null && !request.relations().isEmpty() && !data.isEmpty()) {
+            data = fetchAndAttachRelations(request.tableName(), request.relations(), data);
         }
 
-        // Build SQL selection projection
+        List<AuditLogResponse> auditData = new ArrayList<>();
+        if (request.audit() != null && !request.audit().isEmpty()) {
+            auditData = executeAuditSelect(request, pageable);
+        }
+
+        return new QueryResponse(data, auditData);
+    }
+
+    private List<Map<String, Object>> executeMainSelect(QueryRequest request, Pageable pageable) {
         String fieldsStr = (request.fields() == null || request.fields().isEmpty())
                 ? "*"
                 : String.join(", ", request.fields());
@@ -153,56 +144,156 @@ public class DataService implements IDataService {
         StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s FROM %s", fieldsStr, request.tableName()));
         List<Object> queryParams = new ArrayList<>();
 
-        // Filter by log matched IDs or direct conditions
-        if (useLogTable) {
-            String placeholders = matchedIds.stream().map(id -> "?").collect(Collectors.joining(", "));
-            sqlBuilder.append(String.format(" WHERE id IN (%s)", placeholders));
-            queryParams.addAll(matchedIds);
-        } else {
-            if (request.conditions() != null && !request.conditions().isEmpty()) {
-                sqlBuilder.append(" WHERE ");
-                for (int i = 0; i < request.conditions().size(); i++) {
-                    QueryRequest.Condition condition = request.conditions().get(i);
-                    if (i > 0) {
-                        sqlBuilder.append(" AND ");
+        if (request.conditions() != null && !request.conditions().isEmpty()) {
+            sqlBuilder.append(" WHERE ");
+            for (int i = 0; i < request.conditions().size(); i++) {
+                QueryRequest.Condition condition = request.conditions().get(i);
+                if (i > 0) {
+                    sqlBuilder.append(" AND ");
+                }
+                applyCondition(condition, sqlBuilder, queryParams, false);
+            }
+        }
+
+        applySorts(request.sorts(), sqlBuilder, null);
+
+        sqlBuilder.append(" LIMIT ? OFFSET ?");
+        queryParams.add(pageable.getPageSize());
+        queryParams.add(pageable.getOffset());
+
+        return jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
+    }
+
+    private List<AuditLogResponse> executeAuditSelect(QueryRequest request, Pageable pageable) {
+        String logTableName = request.tableName() + "_log";
+        if (!logTableExists(logTableName)) {
+            throw new ApplicationException(ErrorCode.LOG_TABLE_NOT_FOUND, request.tableName());
+        }
+
+        String fieldsStr = (request.fields() == null || request.fields().isEmpty())
+                ? "*"
+                : String.join(", ", request.fields()) + ", operation_type, executed_at, user_id";
+
+        if (request.fields() != null && !request.fields().isEmpty()) {
+            List<String> auditFields = new ArrayList<>(request.fields());
+            if (!auditFields.contains("operation_type")) auditFields.add("operation_type");
+            if (!auditFields.contains("executed_at")) auditFields.add("executed_at");
+            if (!auditFields.contains("user_id")) auditFields.add("user_id");
+            fieldsStr = String.join(", ", auditFields);
+        }
+
+        StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s FROM %s", fieldsStr, logTableName));
+        List<Object> queryParams = new ArrayList<>();
+
+        if (request.audit() != null && !request.audit().isEmpty()) {
+            sqlBuilder.append(" WHERE ");
+            for (int i = 0; i < request.audit().size(); i++) {
+                QueryRequest.Condition condition = request.audit().get(i);
+                if (i > 0) {
+                    sqlBuilder.append(" AND ");
+                }
+                if ("operation_type".equalsIgnoreCase(condition.column())) {
+                    List<String> ops = dataHelper.parseOperationTypes(String.valueOf(condition.value()));
+                    if (condition.operator() == ALLOWED_OPERATORS.EQUALS) {
+                        if (ops.size() == 1) {
+                            sqlBuilder.append("operation_type = ?");
+                            queryParams.add(ops.getFirst());
+                        } else {
+                            String placeholders = ops.stream().map(o -> "?").collect(Collectors.joining(", "));
+                            sqlBuilder.append(String.format("operation_type IN (%s)", placeholders));
+                            queryParams.addAll(ops);
+                        }
+                    } else if (condition.operator() == ALLOWED_OPERATORS.NOT_EQUALS) {
+                        if (ops.size() == 1) {
+                            sqlBuilder.append("operation_type != ?");
+                            queryParams.add(ops.getFirst());
+                        } else {
+                            String placeholders = ops.stream().map(o -> "?").collect(Collectors.joining(", "));
+                            sqlBuilder.append(String.format("operation_type NOT IN (%s)", placeholders));
+                            queryParams.addAll(ops);
+                        }
+                    } else {
+                        applyCondition(condition, sqlBuilder, queryParams, true);
                     }
-                    applyCondition(condition, sqlBuilder, queryParams);
+                } else {
+                    applyCondition(condition, sqlBuilder, queryParams, true);
                 }
             }
         }
 
-        // Apply sorting clauses
-        if (request.sorts() != null && !request.sorts().isEmpty()) {
+        applySorts(request.sorts(), sqlBuilder, "executed_at DESC");
+
+        sqlBuilder.append(" LIMIT ? OFFSET ?");
+        queryParams.add(pageable.getPageSize());
+        queryParams.add(pageable.getOffset());
+
+        List<Map<String, Object>> logResults = jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
+        
+        List<AuditLogResponse> responseList = new ArrayList<>();
+        for (Map<String, Object> row : logResults) {
+            String opType = (String) row.remove("operation_type");
+            
+            Object executedAtObj = row.remove("executed_at");
+            java.time.LocalDateTime executedAt = null;
+            if (executedAtObj instanceof java.sql.Timestamp ts) {
+                executedAt = ts.toLocalDateTime();
+            } else if (executedAtObj instanceof java.time.LocalDateTime dt) {
+                executedAt = dt;
+            }
+            
+            Object userIdObj = row.remove("user_id");
+            Long uId = null;
+            if (userIdObj instanceof Number num) {
+                uId = num.longValue();
+            }
+
+            responseList.add(new AuditLogResponse(opType, executedAt, uId, row));
+        }
+
+        return responseList;
+    }
+
+    private void applySorts(List<QueryRequest.Sort> sorts, StringBuilder sqlBuilder, String defaultSort) {
+        if (sorts != null && !sorts.isEmpty()) {
             sqlBuilder.append(" ORDER BY ");
-            for (int i = 0; i < request.sorts().size(); i++) {
-                QueryRequest.Sort sort = request.sorts().get(i);
+            for (int i = 0; i < sorts.size(); i++) {
+                QueryRequest.Sort sort = sorts.get(i);
                 if (i > 0) {
                     sqlBuilder.append(", ");
                 }
                 sqlBuilder.append(String.format("%s %s", sort.column(), sort.direction().getValue()));
             }
+        } else if (defaultSort != null) {
+            sqlBuilder.append(" ORDER BY ").append(defaultSort);
         }
-
-        // Apply pagination constraints
-        sqlBuilder.append(" LIMIT ? OFFSET ?");
-        queryParams.add(pageable.getPageSize());
-        queryParams.add(pageable.getOffset());
-
-        // Execute base table select query
-        return jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
     }
 
-    private void applyCondition(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams) {
+    private void applyCondition(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams, boolean isAuditQuery) {
         ALLOWED_OPERATORS op = condition.operator();
+        final boolean validNonAuditQuery = !isAuditQuery && !"created_date".equalsIgnoreCase(condition.column()) && !"last_changed_date".equalsIgnoreCase(condition.column());
         switch (op) {
-            case BETWEEN -> handleBetween(condition, sqlBuilder, queryParams);
+            case BETWEEN -> handleBetween(condition, sqlBuilder, queryParams, isAuditQuery);
             case BEFORE -> {
-                sqlBuilder.append(String.format("%s < ?", condition.column()));
-                queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                if (validNonAuditQuery) {
+                    sqlBuilder.append("(created_date < ? OR last_changed_date < ?)");
+                    Object parsedVal = dataHelper.parseIfDateTime(condition.value());
+                    queryParams.add(parsedVal);
+                    queryParams.add(parsedVal);
+                } else {
+                    sqlBuilder.append(String.format("%s < ?", condition.column()));
+                    queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                }
             }
             case AFTER -> {
-                sqlBuilder.append(String.format("%s > ?", condition.column()));
-                queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                if (validNonAuditQuery) {
+                    sqlBuilder.append("(created_date > ? OR last_changed_date > ?)");
+                    Object parsedVal = dataHelper.parseIfDateTime(condition.value());
+                    queryParams.add(parsedVal);
+                    queryParams.add(parsedVal);
+                } else {
+                    sqlBuilder.append(String.format("%s > ?", condition.column()));
+                    queryParams.add(dataHelper.parseIfDateTime(condition.value()));
+                }
             }
             default -> {
                 sqlBuilder.append(String.format("%s %s ?", condition.column(), op.getValue()));
@@ -211,27 +302,37 @@ public class DataService implements IDataService {
         }
     }
 
-    private void handleBetween(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams) {
-        sqlBuilder.append(String.format("%s BETWEEN ? AND ?", condition.column()));
+    private void handleBetween(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams, boolean isAuditQuery) {
         Object value = condition.value();
+        List<Object> parsedValues = new ArrayList<>();
 
         if (value instanceof List<?> list && list.size() >= 2) {
-            queryParams.add(dataHelper.parseIfDateTime(list.get(0)));
-            queryParams.add(dataHelper.parseIfDateTime(list.get(1)));
+            parsedValues.add(dataHelper.parseIfDateTime(list.get(0)));
+            parsedValues.add(dataHelper.parseIfDateTime(list.get(1)));
         } else if (value instanceof Object[] arr && arr.length >= 2) {
-            queryParams.add(dataHelper.parseIfDateTime(arr[0]));
-            queryParams.add(dataHelper.parseIfDateTime(arr[1]));
+            parsedValues.add(dataHelper.parseIfDateTime(arr[0]));
+            parsedValues.add(dataHelper.parseIfDateTime(arr[1]));
         } else {
             String valStr = String.valueOf(value);
             if (valStr.contains(",")) {
                 String[] parts = valStr.split(",");
-                queryParams.add(dataHelper.parseIfDateTime(parts[0].trim()));
-                queryParams.add(dataHelper.parseIfDateTime(parts[1].trim()));
+                parsedValues.add(dataHelper.parseIfDateTime(parts[0].trim()));
+                parsedValues.add(dataHelper.parseIfDateTime(parts[1].trim()));
             } else {
-                queryParams.add(dataHelper.parseIfDateTime(value));
-                queryParams.add(dataHelper.parseIfDateTime(value));
+                parsedValues.add(dataHelper.parseIfDateTime(value));
+                parsedValues.add(dataHelper.parseIfDateTime(value));
             }
         }
+
+        if (!isAuditQuery && !"created_date".equalsIgnoreCase(condition.column()) && !"last_changed_date".equalsIgnoreCase(condition.column())) {
+            sqlBuilder.append("((created_date BETWEEN ? AND ?) OR (last_changed_date BETWEEN ? AND ?))");
+            queryParams.add(parsedValues.get(0));
+            queryParams.add(parsedValues.get(1));
+        } else {
+            sqlBuilder.append(String.format("%s BETWEEN ? AND ?", condition.column()));
+        }
+        queryParams.add(parsedValues.get(0));
+        queryParams.add(parsedValues.get(1));
     }
 
 
@@ -317,9 +418,17 @@ public class DataService implements IDataService {
         }
         dataHelper.validateRowRegex(metadata, updateData);
         dataHelper.validateRowDates(metadata, updateData);
+
+        Map<String, Object> finalUpdateData = new HashMap<>(updateData);
+        SystemColumn sysCols = SystemColumn.defaults();
+        finalUpdateData.remove(sysCols.creatorId().name());
+        finalUpdateData.remove(sysCols.createdDate().name());
+        finalUpdateData.put(sysCols.lastUpdaterId().name(), userId);
+        finalUpdateData.put(sysCols.lastChangedDate().name(), LocalDateTime.now());
+
         List<String> sets = new ArrayList<>();
         List<Object> values = new ArrayList<>();
-        for (Map.Entry<String, Object> entry : updateData.entrySet()) {
+        for (Map.Entry<String, Object> entry : finalUpdateData.entrySet()) {
             if (!entry.getKey().equalsIgnoreCase("id")) {
                 sets.add(entry.getKey() + " = ?");
                 values.add(entry.getValue());
@@ -339,7 +448,7 @@ public class DataService implements IDataService {
             handleDataIntegrityViolation(e);
             throw e;
         }
-        Map<String, Object> fullPayload = new HashMap<>(updateData);
+        Map<String, Object> fullPayload = new HashMap<>(finalUpdateData);
         fullPayload.put("id", id);
         kafkaPublisher.publishMutation(tableName, "UPDATE", fullPayload, userId);
 
@@ -368,7 +477,7 @@ public class DataService implements IDataService {
                 id,
                 tableName,
                 "UPDATE",
-                updateData
+                finalUpdateData
         );
     }
 
@@ -434,6 +543,126 @@ public class DataService implements IDataService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+
+    private List<Map<String, Object>> fetchAndAttachRelations(String tableName, List<QueryRequest.RelationQuery> requestedRelations, List<Map<String, Object>> data) {
+        List<ResolvedRelation> resolvedRelations = relationService.getRelationsForTable(tableName);
+
+        List<Object> baseIds = new ArrayList<>();
+        for (Map<String, Object> row : data) {
+            Object idVal = row.get("id");
+            if (idVal != null) {
+                baseIds.add(idVal);
+            }
+        }
+        if (baseIds.isEmpty()) {
+            return data;
+        }
+
+        List<Map<String, Object>> mutableData = new ArrayList<>();
+        for (Map<String, Object> row : data) {
+            mutableData.add(new HashMap<>(row));
+        }
+
+        for (QueryRequest.RelationQuery relQuery : requestedRelations) {
+            String relName = relQuery.relation();
+
+            ResolvedRelation match = resolvedRelations.stream()
+                    .filter(r -> r.relationName().equalsIgnoreCase(relName))
+                    .findFirst()
+                    .orElse(null);
+
+            if (match == null) {
+                for (Map<String, Object> row : mutableData) {
+                    row.put(relName, List.of());
+                }
+                continue;
+            }
+
+            List<Map<String, Object>> relatedRows = new ArrayList<>();
+            String targetTable = match.targetTable();
+
+            if (RelationJoinType.M2M == match.type()) {
+                String placeholders = baseIds.stream().map(id -> "?").collect(Collectors.joining(", "));
+                String sql = String.format(
+                        "SELECT J.%s AS base_id, B.* FROM %s B JOIN %s J ON B.id = J.%s WHERE J.%s IN (%s)",
+                        match.junctionBaseCol(), targetTable, match.junctionTable(), match.junctionTargetCol(), match.junctionBaseCol(), placeholders
+                );
+                relatedRows = jdbcTemplate.queryForList(sql, baseIds.toArray());
+
+            } else if (RelationJoinType.FORWARD == match.type()) {
+                List<Object> fkValues = new ArrayList<>();
+                for (Map<String, Object> row : mutableData) {
+                    Object val = row.get(match.baseColumn());
+                    if (val != null) {
+                        fkValues.add(val);
+                    }
+                }
+                if (!fkValues.isEmpty()) {
+                    String placeholders = fkValues.stream().map(v -> "?").collect(Collectors.joining(", "));
+                    String sql = String.format("SELECT * FROM %s WHERE id IN (%s)", targetTable, placeholders);
+                    List<Map<String, Object>> targetRows = jdbcTemplate.queryForList(sql, fkValues.toArray());
+
+                    Map<Object, Map<String, Object>> targetMap = new HashMap<>();
+                    for (Map<String, Object> tRow : targetRows) {
+                        Object idVal = tRow.get("id");
+                        if (idVal != null) {
+                            targetMap.put(String.valueOf(idVal), tRow);
+                            targetMap.put(idVal, tRow);
+                        }
+                    }
+
+                    for (Map<String, Object> row : mutableData) {
+                        Object fkVal = row.get(match.baseColumn());
+                        if (fkVal != null && (targetMap.containsKey(fkVal) || targetMap.containsKey(String.valueOf(fkVal)))) {
+                            Object matchedRow = targetMap.get(fkVal);
+                            if (matchedRow == null) {
+                                matchedRow = targetMap.get(String.valueOf(fkVal));
+                            }
+                            row.put(relName, List.of(matchedRow));
+                        } else {
+                            row.put(relName, List.of());
+                        }
+                    }
+                    continue;
+                } else {
+                    for (Map<String, Object> row : mutableData) {
+                        row.put(relName, List.of());
+                    }
+                    continue;
+                }
+
+            } else if (RelationJoinType.REVERSE == match.type()) {
+                String placeholders = baseIds.stream().map(id -> "?").collect(Collectors.joining(", "));
+                String sql = String.format(
+                        "SELECT %s AS base_id, B.* FROM %s B WHERE %s IN (%s)",
+                        match.targetColumn(), targetTable, match.targetColumn(), placeholders
+                );
+                relatedRows = jdbcTemplate.queryForList(sql, baseIds.toArray());
+            }
+
+            Map<String, List<Map<String, Object>>> grouped = new HashMap<>();
+            for (Map<String, Object> rRow : relatedRows) {
+                Object baseIdVal = rRow.remove("base_id");
+                if (baseIdVal != null) {
+                    String baseIdStr = String.valueOf(baseIdVal);
+                    grouped.computeIfAbsent(baseIdStr, k -> new ArrayList<>()).add(rRow);
+                }
+            }
+
+            for (Map<String, Object> row : mutableData) {
+                Object idVal = row.get("id");
+                if (idVal != null) {
+                    String idStr = String.valueOf(idVal);
+                    row.put(relName, grouped.getOrDefault(idStr, List.of()));
+                } else {
+                    row.put(relName, List.of());
+                }
+            }
+        }
+
+        return mutableData;
     }
 
     private void handleDataIntegrityViolation(DataIntegrityViolationException e) {

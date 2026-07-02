@@ -12,6 +12,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/relations")
@@ -74,5 +75,12 @@ public class RelationController {
                                                         @Valid @RequestBody ManyToManyInsertRequest request) {
         relationService.deleteManyToManyDataByName(tableName, request);
         return ApiResponse.success(HttpStatus.OK.value(), null);
+    }
+
+    @GetMapping
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<List<RelationResponse>> getAllRelations() {
+        var response = relationService.getAllRelations();
+        return ApiResponse.success(HttpStatus.OK.value(), response);
     }
 }

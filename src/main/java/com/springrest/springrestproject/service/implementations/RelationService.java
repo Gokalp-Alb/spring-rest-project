@@ -3,14 +3,15 @@ package com.springrest.springrestproject.service.implementations;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
-import com.springrest.springrestproject.dto.request.relation.ManyToManyRelationRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyInsertRequest;
+import com.springrest.springrestproject.dto.request.relation.ManyToManyRelationRequest;
 import com.springrest.springrestproject.dto.response.relation.RelationResponse;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.relation.DeletePolicy;
 import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
+import com.springrest.springrestproject.service.implementations.redis.RelationCacheService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.validators.ColumnRelationValidator;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-
+import java.util.Map;
+import java.util.ArrayList;
+import java.util.stream.Collectors;
+import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
+import com.springrest.springrestproject.model.relation.RelationJoinType;
 @Service
 @RequiredArgsConstructor
 public class RelationService implements IRelationService {
@@ -27,6 +32,7 @@ public class RelationService implements IRelationService {
     private final TableMetadataRepo tableMetadataRepo;
     private final JdbcTemplate jdbcTemplate;
     private final ColumnRelationValidator columnRelationValidator;
+    private final RelationCacheService relationCacheService;
 
     @Override
     @Transactional
@@ -72,6 +78,7 @@ public class RelationService implements IRelationService {
 
         sourceTable.getColumns().add(col);
         tableMetadataRepo.save(sourceTable);
+        relationCacheService.evict(request.relatedTable());
 
         return new RelationResponse(
                 request.tableName(),
@@ -164,8 +171,10 @@ public class RelationService implements IRelationService {
         c2.setRelatedColumn("id");
         c2.setDeletePolicy(policy2);
 
-        junctionMeta.setColumns(java.util.List.of(c1, c2));
+        junctionMeta.setColumns(List.of(c1, c2));
         tableMetadataRepo.save(junctionMeta);
+        relationCacheService.evict(request.tableName());
+        relationCacheService.evict(request.relatedTable());
 
         return new RelationResponse(
                 request.tableName(),
@@ -238,5 +247,129 @@ public class RelationService implements IRelationService {
         if (rowsAffected == 0) {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
         }
+    }
+
+    @Override
+    public List<RelationResponse> getAllRelations() {
+        List<ColumnMetadata> relColumns = tableMetadataRepo.findAllRelationColumns();
+        
+        Map<String, List<ColumnMetadata>> byTable = relColumns.stream()
+                .collect(Collectors.groupingBy(ColumnMetadata::getTableName));
+
+        List<RelationResponse> responses = new ArrayList<>();
+
+        for (Map.Entry<String, List<ColumnMetadata>> entry : byTable.entrySet()) {
+            String tableName = entry.getKey();
+            List<ColumnMetadata> cols = entry.getValue();
+
+            TableMetadata tableMeta = tableMetadataRepo.findByTableName(tableName).orElse(null);
+            boolean isJunction = tableMeta != null && tableMeta.getColumns() != null
+                    && tableMeta.getColumns().size() == 2
+                    && cols.size() == 2
+                    && cols.stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+
+            if (isJunction) {
+                ColumnMetadata c1 = cols.get(0);
+                ColumnMetadata c2 = cols.get(1);
+                responses.add(new RelationResponse(
+                        c1.getRelatedTable(),
+                        null,
+                        c2.getRelatedTable(),
+                        null,
+                        RelationType.MANY_TO_MANY,
+                        c1.getDeletePolicy(),
+                        c2.getDeletePolicy()
+                ));
+            } else {
+                for (ColumnMetadata col : cols) {
+                    responses.add(new RelationResponse(
+                            tableName,
+                            col.getColumnName(),
+                            col.getRelatedTable(),
+                            col.getRelatedColumn(),
+                            col.getRelationType(),
+                            col.getDeletePolicy(),
+                            null
+                    ));
+                }
+            }
+        }
+        return responses;
+    }
+
+    @Override
+    public List<ResolvedRelation> getRelationsForTable(String tableName) {
+        List<ResolvedRelation> relations = new ArrayList<>();
+
+        List<ColumnMetadata> allRelCols = tableMetadataRepo.findAllRelationColumns();
+
+        Map<String, List<ColumnMetadata>> colsByTable = allRelCols.stream()
+                .collect(Collectors.groupingBy(ColumnMetadata::getTableName));
+
+        for (Map.Entry<String, List<ColumnMetadata>> entry : colsByTable.entrySet()) {
+            String table = entry.getKey();
+            List<ColumnMetadata> cols = entry.getValue();
+
+            TableMetadata tableMeta = tableMetadataRepo.findByTableName(table).orElse(null);
+            boolean isJunction = tableMeta != null && tableMeta.getColumns() != null
+                    && tableMeta.getColumns().size() == 2
+                    && cols.size() == 2
+                    && cols.stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+
+            if (isJunction) {
+                ColumnMetadata c1 = cols.get(0);
+                ColumnMetadata c2 = cols.get(1);
+
+                if (c1.getRelatedTable().equalsIgnoreCase(tableName)) {
+                    String targetTable = c2.getRelatedTable();
+                    relations.add(new ResolvedRelation(targetTable, targetTable, RelationJoinType.M2M, null, null, table, c1.getColumnName(), c2.getColumnName()));
+                    relations.add(new ResolvedRelation(targetTable + "_via_" + table, targetTable, RelationJoinType.M2M, null, null, table, c1.getColumnName(), c2.getColumnName()));
+                } else if (c2.getRelatedTable().equalsIgnoreCase(tableName)) {
+                    String targetTable = c1.getRelatedTable();
+                    relations.add(new ResolvedRelation(targetTable, targetTable, RelationJoinType.M2M, null, null, table, c2.getColumnName(), c1.getColumnName()));
+                    relations.add(new ResolvedRelation(targetTable + "_via_" + table, targetTable, RelationJoinType.M2M, null, null, table, c2.getColumnName(), c1.getColumnName()));
+                }
+            }
+        }
+
+        TableMetadata baseTableMeta = tableMetadataRepo.findByTableName(tableName).orElse(null);
+        boolean isBaseJunction = baseTableMeta != null && baseTableMeta.getColumns() != null
+                && baseTableMeta.getColumns().size() == 2
+                && colsByTable.containsKey(tableName)
+                && colsByTable.get(tableName).size() == 2
+                && colsByTable.get(tableName).stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+
+        if (!isBaseJunction) {
+            List<ColumnMetadata> baseCols = colsByTable.getOrDefault(tableName, List.of());
+            for (ColumnMetadata col : baseCols) {
+                String targetTable = col.getRelatedTable();
+                relations.add(new ResolvedRelation(targetTable, targetTable, RelationJoinType.FORWARD, col.getColumnName(), col.getRelatedColumn(), null, null, null));
+                relations.add(new ResolvedRelation(targetTable + "_via_" + col.getColumnName(), targetTable, RelationJoinType.FORWARD, col.getColumnName(), col.getRelatedColumn(), null, null, null));
+            }
+
+            for (Map.Entry<String, List<ColumnMetadata>> entry : colsByTable.entrySet()) {
+                String otherTable = entry.getKey();
+                if (otherTable.equalsIgnoreCase(tableName)) {
+                    continue;
+                }
+                List<ColumnMetadata> cols = entry.getValue();
+                TableMetadata otherTableMeta = tableMetadataRepo.findByTableName(otherTable).orElse(null);
+                boolean isOtherJunction = otherTableMeta != null && otherTableMeta.getColumns() != null
+                        && otherTableMeta.getColumns().size() == 2
+                        && cols.size() == 2
+                        && cols.stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+
+                if (!isOtherJunction) {
+                    for (ColumnMetadata col : cols) {
+                        if (col.getRelatedTable().equalsIgnoreCase(tableName)) {
+                            relations.add(new ResolvedRelation(otherTable, otherTable, RelationJoinType.REVERSE, null, col.getColumnName(), null, null, null));
+                            relations.add(new ResolvedRelation(otherTable + "_via_" + col.getColumnName(), otherTable, RelationJoinType.REVERSE, null, col.getColumnName(), null, null, null));
+                        }
+                    }
+                }
+            }
+        }
+
+        return relations;
     }
 }

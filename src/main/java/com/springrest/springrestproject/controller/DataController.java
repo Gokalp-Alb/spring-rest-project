@@ -4,6 +4,7 @@ import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
+import com.springrest.springrestproject.dto.response.data.QueryResponse;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +17,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -39,13 +39,13 @@ public class DataController {
 
     @PostMapping("/queries/select")
     @ResponseStatus(HttpStatus.OK)
-    public ApiResponse<List<Map<String, Object>>> select(
+    public ApiResponse<QueryResponse> select(
             @AuthenticationPrincipal Jwt jwt,
             @RequestBody QueryRequest request,
             @RequestParam(name = "page", required = false, defaultValue = "0") int page,
             @RequestParam(name = "size", required = false, defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);
-        List<Map<String, Object>> results = dataService.executeSelect(request, jwt.getClaim("userId"), pageable);
+        QueryResponse results = dataService.executeSelect(request, jwt.getClaim("userId"), pageable);
         return ApiResponse.success(HttpStatus.OK.value(), results);
     }
 

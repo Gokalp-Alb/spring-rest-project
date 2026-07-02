@@ -6,6 +6,8 @@ import com.springrest.springrestproject.model.relation.DeletePolicy;
 import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableContext;
 import com.springrest.springrestproject.model.table.TableMetadata;
+import com.springrest.springrestproject.service.implementations.redis.RelationCacheService;
+import com.springrest.springrestproject.service.implementations.redis.TableMetadataCacheService;
 import lombok.RequiredArgsConstructor;
 import org.jooq.DSLContext;
 import org.jooq.Record;
@@ -26,6 +28,8 @@ import static jooq.generated.Tables.*;
 @RequiredArgsConstructor
 public class TableMetadataRepo {
     private final DSLContext dsl;
+    private final RelationCacheService relationCacheService;
+    private final TableMetadataCacheService tableMetadataCacheService;
 
     @Transactional
     public TableMetadata save(TableMetadata metadata) {
@@ -90,6 +94,8 @@ public class TableMetadataRepo {
                 logColumnMetadataMutation(col, metadata.getId(), "POST");
             }
         }
+        
+        tableMetadataCacheService.evict(metadata.getTableName());
         return metadata;
     }
 
@@ -108,6 +114,8 @@ public class TableMetadataRepo {
         dsl.deleteFrom(TABLE_METADATA)
                 .where(TABLE_METADATA.ID.eq(metadata.getId()))
                 .execute();
+                
+        tableMetadataCacheService.evict(metadata.getTableName());
     }
 
     private void logTableMetadataMutation(TableMetadata metadata, String operation) {
@@ -192,28 +200,18 @@ public class TableMetadataRepo {
         return Optional.ofNullable(metadata);
     }
 
-    public Optional<TableMetadata> findByName(String tableName) {
-        TableMetadata metadata = dsl.selectFrom(TABLE_METADATA)
-                .where(TABLE_METADATA.TABLE_NAME.eq(tableName))
-                .fetchOneInto(TableMetadata.class);
-        if (metadata != null) {
-            metadata.setColumns(fetchColumnsForTable(metadata.getId()));
-            populateTableContext(metadata);
-        }
-
-        return Optional.ofNullable(metadata);
-    }
-
     public Optional<TableMetadata> findByTableName(String tableName) {
-        TableMetadata metadata = dsl.selectFrom(TABLE_METADATA)
-                .where(TABLE_METADATA.TABLE_NAME.eq(tableName))
-                .fetchOneInto(TableMetadata.class);
-        if (metadata != null) {
-            metadata.setColumns(fetchColumnsForTable(metadata.getId()));
-            populateTableContext(metadata);
-        }
-
-        return Optional.ofNullable(metadata);
+        return tableMetadataCacheService.get(tableName).or(() -> {
+            TableMetadata metadata = dsl.selectFrom(TABLE_METADATA)
+                    .where(TABLE_METADATA.TABLE_NAME.eq(tableName))
+                    .fetchOneInto(TableMetadata.class);
+            if (metadata != null) {
+                metadata.setColumns(fetchColumnsForTable(metadata.getId()));
+                populateTableContext(metadata);
+                tableMetadataCacheService.put(metadata);
+            }
+            return Optional.ofNullable(metadata);
+        });
     }
 
     private void populateTableContext(TableMetadata metadata) {
@@ -233,8 +231,37 @@ public class TableMetadataRepo {
         }
     }
 
+    public List<ColumnMetadata> getIncomingFKs(String tableName) {
+        return relationCacheService.get(tableName)
+                .orElseGet(() -> {
+                    List<ColumnMetadata> result = findColumnsPointingToTable(tableName);
+                    relationCacheService.put(tableName, result);
+                    return result;
+                });
+    }
 
-    public List<ColumnMetadata> findColumnsPointingToTable(String tableName) {
+    public List<ColumnMetadata> findAllRelationColumns() {
+        return dsl.select(
+                    COLUMN_METADATA.ID,
+                    COLUMN_METADATA.COLUMN_NAME,
+                    COLUMN_METADATA.DATA_TYPE,
+                    COLUMN_METADATA.RELATION_TYPE,
+                    COLUMN_METADATA.RELATED_TABLE,
+                    COLUMN_METADATA.RELATED_COLUMN,
+                    COLUMN_METADATA.DELETE_POLICY,
+                    TABLE_METADATA.TABLE_NAME
+                )
+                .from(COLUMN_METADATA)
+                .join(TABLE_METADATA).on(COLUMN_METADATA.TABLE_ID.eq(TABLE_METADATA.ID))
+                .where(COLUMN_METADATA.RELATION_TYPE.isNotNull())
+                .fetch(record -> {
+                    ColumnMetadata col = mapRecordToColumnMetadata(record);
+                    col.setTableName(record.get(TABLE_METADATA.TABLE_NAME));
+                    return col;
+                });
+    }
+
+    private List<ColumnMetadata> findColumnsPointingToTable(String tableName) {
         return dsl.select(
                     COLUMN_METADATA.ID,
                     COLUMN_METADATA.COLUMN_NAME,

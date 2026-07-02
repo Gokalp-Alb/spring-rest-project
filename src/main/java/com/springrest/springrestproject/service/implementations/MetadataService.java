@@ -8,12 +8,14 @@ import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.model.SystemDdlLog;
 import com.springrest.springrestproject.model.column.ColumnContext;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
+import com.springrest.springrestproject.model.column.SystemColumn;
 import com.springrest.springrestproject.model.relation.DeletePolicy;
 import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableContext;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.SystemDdlLogRepo;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
+import com.springrest.springrestproject.service.implementations.redis.RelationCacheService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -36,6 +38,7 @@ public class MetadataService implements IMetadataService {
     private final JdbcTemplate jdbcTemplate;
     private final SystemDdlLogRepo ddlLogRepo;
     private final TableMapper tableMapper;
+    private final RelationCacheService relationCacheService;
 
     @Override
     @Transactional
@@ -44,9 +47,11 @@ public class MetadataService implements IMetadataService {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
         }
 
+        List<ColumnMetadata> augmentedColumns = new ArrayList<>(request.columns());
+        augmentedColumns.addAll(createSystemColumns());
         List<String> colDefs = new ArrayList<>();
 
-        for (ColumnMetadata col : request.columns()) {
+        for (ColumnMetadata col : augmentedColumns) {
             String columnDef = col.getColumnName() + " " + col.getDataType();
             if (col.getColumnContext() != null && col.getColumnContext().getIsUnique()) {
                 columnDef += " UNIQUE";
@@ -64,7 +69,7 @@ public class MetadataService implements IMetadataService {
         //Audit Creation
         if (request.isAuditEnabled() != null && request.isAuditEnabled()) {
             String logTableName = tableName + "_log";
-            String logColumnsSql = request.columns().stream()
+            String logColumnsSql = augmentedColumns.stream()
                     .map(col -> col.getColumnName() + " " + col.getDataType())
                     .collect(Collectors.joining(", "));
             String logColumnsStr = logColumnsSql.isEmpty() ? "" : ", " + logColumnsSql;
@@ -81,7 +86,7 @@ public class MetadataService implements IMetadataService {
         tableContext.setLastUpdaterId(userId);
         tableContext.setLastChangedDate(LocalDateTime.now());
 
-        List<ColumnMetadata> domainColumns = request.columns().stream().map(srcCol -> {
+        List<ColumnMetadata> domainColumns = augmentedColumns.stream().map(srcCol -> {
             ColumnMetadata targetCol = new ColumnMetadata();
             targetCol.setColumnName(srcCol.getColumnName());
             targetCol.setDataType(srcCol.getDataType());
@@ -128,7 +133,7 @@ public class MetadataService implements IMetadataService {
 
     @Override
     public TableResponse getTableByName(String tableId) {
-        TableMetadata metadata = tableMetadataRepo.findByName(tableId)
+        TableMetadata metadata = tableMetadataRepo.findByTableName(tableId)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         return tableMapper.toResponse(metadata);
     }
@@ -142,14 +147,13 @@ public class MetadataService implements IMetadataService {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
 
-        List<ColumnMetadata> referencingColumns = tableMetadataRepo.findColumnsPointingToTable(tableName);
+        List<ColumnMetadata> referencingColumns = tableMetadataRepo.getIncomingFKs(tableName);
 
         boolean useCascade = false;
         
         for (ColumnMetadata fkCol : referencingColumns) {
             TableMetadata parentTable = tableMetadataRepo.findByTableName(fkCol.getTableName())
                     .orElse(null);
-                    
             boolean isJunction = parentTable != null && parentTable.getColumns() != null 
                                  && parentTable.getColumns().size() == 2 
                                  && parentTable.getColumns().stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
@@ -166,6 +170,12 @@ public class MetadataService implements IMetadataService {
                 jdbcTemplate.execute(dropJunctionSql);
                 
                 tableMetadataRepo.findByTableName(fkCol.getTableName()).ifPresent(tableMetadataRepo::delete);
+                
+                for (ColumnMetadata jCol : parentTable.getColumns()) {
+                    if (jCol.getRelatedTable() != null && !jCol.getRelatedTable().equalsIgnoreCase(tableName)) {
+                        relationCacheService.evict(jCol.getRelatedTable());
+                    }
+                }
             } else {
                 String dropColSql = String.format("ALTER TABLE %s DROP COLUMN IF EXISTS %s CASCADE;",
                         fkCol.getTableName(), fkCol.getColumnName());
@@ -195,7 +205,17 @@ public class MetadataService implements IMetadataService {
 
         logSchemaChange(tableName, dropTableSql, userId);
         jdbcTemplate.execute(dropTableSql);
+        
+        if (metadata.getColumns() != null) {
+            for (ColumnMetadata col : metadata.getColumns()) {
+                if (col.getRelatedTable() != null) {
+                    relationCacheService.evict(col.getRelatedTable());
+                }
+            }
+        }
+        
         tableMetadataRepo.delete(metadata);
+        relationCacheService.evict(tableName);
         
         return new TableResponse(
                 metadata.getId(),
@@ -215,6 +235,36 @@ public class MetadataService implements IMetadataService {
                 .build();
 
         ddlLogRepo.save(logEntry);
+    }
+
+    private List<ColumnMetadata> createSystemColumns() {
+        SystemColumn sysCols = SystemColumn.defaults();
+
+        ColumnMetadata c1 = new ColumnMetadata();
+        c1.setColumnName(sysCols.creatorId().name());
+        c1.setDataType(sysCols.creatorId().type());
+
+        ColumnMetadata c2 = new ColumnMetadata();
+        c2.setColumnName(sysCols.createdDate().name());
+        c2.setDataType(sysCols.createdDate().type());
+
+        ColumnMetadata c3 = new ColumnMetadata();
+        c3.setColumnName(sysCols.lastUpdaterId().name());
+        c3.setDataType(sysCols.lastUpdaterId().type());
+
+        ColumnMetadata c4 = new ColumnMetadata();
+        c4.setColumnName(sysCols.lastChangedDate().name());
+        c4.setDataType(sysCols.lastChangedDate().type());
+
+        List<ColumnMetadata> sysColMeta = List.of(c1, c2, c3, c4);
+
+        for (ColumnMetadata cm : sysColMeta) {
+            ColumnContext ctx = new ColumnContext();
+            ctx.setIsUnique(false);
+            ctx.setIsSensitive(false);
+            cm.setColumnContext(ctx);
+        }
+        return sysColMeta;
     }
 
 }
