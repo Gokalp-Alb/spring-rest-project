@@ -11,6 +11,7 @@ import com.springrest.springrestproject.service.implementations.redis.TableMetad
 import lombok.RequiredArgsConstructor;
 import org.jooq.DSLContext;
 import org.jooq.Record;
+import org.jooq.impl.DSL;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -311,5 +312,15 @@ public class TableMetadataRepo {
         col.setDeletePolicy(delPolicyStr != null ? DeletePolicy.valueOf(delPolicyStr) : null);
 
         return col;
+    }
+
+    public List<String> findJunctionTableNames() {
+        return dsl.select(TABLE_METADATA.TABLE_NAME)
+                .from(TABLE_METADATA)
+                .join(COLUMN_METADATA).on(COLUMN_METADATA.TABLE_ID.eq(TABLE_METADATA.ID))
+                .groupBy(TABLE_METADATA.ID, TABLE_METADATA.TABLE_NAME)
+                .having(DSL.count().eq(2)
+                        .and(DSL.count(DSL.when(COLUMN_METADATA.RELATION_TYPE.eq(RelationType.MANY_TO_ONE.name()), 1)).eq(2)))
+                .fetch(TABLE_METADATA.TABLE_NAME);
     }
 }

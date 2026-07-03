@@ -11,6 +11,7 @@ import com.springrest.springrestproject.dto.response.data.AuditLogResponse;
 import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.dto.response.data.QueryResponse;
 import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
+import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.column.SystemColumn;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.AppUserRepo;
@@ -137,12 +138,48 @@ public class DataService implements IDataService {
     }
 
     private List<Map<String, Object>> executeMainSelect(QueryRequest request, Pageable pageable) {
-        String fieldsStr = (request.fields() == null || request.fields().isEmpty())
-                ? "*"
-                : String.join(", ", request.fields());
+        String fieldsStr;
+        if (request.fields() == null || request.fields().isEmpty()) {
+            fieldsStr = "T.*";
+        } else {
+            fieldsStr = request.fields().stream()
+                    .map(field -> "T." + field)
+                    .collect(Collectors.joining(", "));
+        }
 
-        StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s FROM %s", fieldsStr, request.tableName()));
+        String distinctStr = (request.relations() != null && !request.relations().isEmpty()) ? "DISTINCT " : "";
+        StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s%s FROM %s T", distinctStr, fieldsStr, request.tableName()));
         List<Object> queryParams = new ArrayList<>();
+
+        if (request.relations() != null && !request.relations().isEmpty()) {
+            List<ResolvedRelation> resolvedRelations = relationService.getRelationsForTable(request.tableName());
+            int relationIndex = 0;
+            for (QueryRequest.RelationQuery relQuery : request.relations()) {
+                String relName = relQuery.relation();
+                ResolvedRelation match = resolvedRelations.stream()
+                        .filter(r -> r.relationName().equalsIgnoreCase(relName))
+                        .findFirst()
+                        .orElse(null);
+                if (match != null) {
+                    String aliasTarget = "B" + relationIndex;
+                    String aliasJunction = "J" + relationIndex;
+                    if (RelationJoinType.M2M == match.type()) {
+                        sqlBuilder.append(String.format(" INNER JOIN %s %s ON T.id = %s.%s",
+                                match.junctionTable(), aliasJunction, aliasJunction, match.junctionBaseCol()));
+                        sqlBuilder.append(String.format(" INNER JOIN %s %s ON %s.%s = %s.id",
+                                match.targetTable(), aliasTarget, aliasJunction, match.junctionTargetCol(), aliasTarget));
+                    } else if (RelationJoinType.FORWARD == match.type()) {
+                        String relatedCol = match.targetColumn() != null ? match.targetColumn() : "id";
+                        sqlBuilder.append(String.format(" INNER JOIN %s %s ON T.%s = %s.%s",
+                                match.targetTable(), aliasTarget, match.baseColumn(), aliasTarget, relatedCol));
+                    } else if (RelationJoinType.REVERSE == match.type()) {
+                        sqlBuilder.append(String.format(" INNER JOIN %s %s ON T.id = %s.%s",
+                                match.targetTable(), aliasTarget, aliasTarget, match.targetColumn()));
+                    }
+                    relationIndex++;
+                }
+            }
+        }
 
         if (request.conditions() != null && !request.conditions().isEmpty()) {
             sqlBuilder.append(" WHERE ");
@@ -151,11 +188,11 @@ public class DataService implements IDataService {
                 if (i > 0) {
                     sqlBuilder.append(" AND ");
                 }
-                applyCondition(condition, sqlBuilder, queryParams, false);
+                applyCondition(condition, sqlBuilder, queryParams, false, "T");
             }
         }
 
-        applySorts(request.sorts(), sqlBuilder, null);
+        applySorts(request.sorts(), sqlBuilder, null, "T");
 
         sqlBuilder.append(" LIMIT ? OFFSET ?");
         queryParams.add(pageable.getPageSize());
@@ -213,15 +250,15 @@ public class DataService implements IDataService {
                             queryParams.addAll(ops);
                         }
                     } else {
-                        applyCondition(condition, sqlBuilder, queryParams, true);
+                        applyCondition(condition, sqlBuilder, queryParams, true, null);
                     }
                 } else {
-                    applyCondition(condition, sqlBuilder, queryParams, true);
+                    applyCondition(condition, sqlBuilder, queryParams, true, null);
                 }
             }
         }
 
-        applySorts(request.sorts(), sqlBuilder, "executed_at DESC");
+        applySorts(request.sorts(), sqlBuilder, "executed_at DESC", null);
 
         sqlBuilder.append(" LIMIT ? OFFSET ?");
         queryParams.add(pageable.getPageSize());
@@ -253,7 +290,7 @@ public class DataService implements IDataService {
         return responseList;
     }
 
-    private void applySorts(List<QueryRequest.Sort> sorts, StringBuilder sqlBuilder, String defaultSort) {
+    private void applySorts(List<QueryRequest.Sort> sorts, StringBuilder sqlBuilder, String defaultSort, String tablePrefix) {
         if (sorts != null && !sorts.isEmpty()) {
             sqlBuilder.append(" ORDER BY ");
             for (int i = 0; i < sorts.size(); i++) {
@@ -261,48 +298,50 @@ public class DataService implements IDataService {
                 if (i > 0) {
                     sqlBuilder.append(", ");
                 }
-                sqlBuilder.append(String.format("%s %s", sort.column(), sort.direction().getValue()));
+                String column = (tablePrefix != null && !tablePrefix.isEmpty()) ? tablePrefix + "." + sort.column() : sort.column();
+                sqlBuilder.append(String.format("%s %s", column, sort.direction().getValue()));
             }
         } else if (defaultSort != null) {
             sqlBuilder.append(" ORDER BY ").append(defaultSort);
         }
     }
 
-    private void applyCondition(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams, boolean isAuditQuery) {
+    private void applyCondition(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams, boolean isAuditQuery, String tablePrefix) {
         ALLOWED_OPERATORS op = condition.operator();
         final boolean validNonAuditQuery = !isAuditQuery && !"created_date".equalsIgnoreCase(condition.column()) && !"last_changed_date".equalsIgnoreCase(condition.column());
+        String colPrefix = (tablePrefix != null && !tablePrefix.isEmpty()) ? tablePrefix + "." : "";
         switch (op) {
-            case BETWEEN -> handleBetween(condition, sqlBuilder, queryParams, isAuditQuery);
+            case BETWEEN -> handleBetween(condition, sqlBuilder, queryParams, isAuditQuery, tablePrefix);
             case BEFORE -> {
                 if (validNonAuditQuery) {
-                    sqlBuilder.append("(created_date < ? OR last_changed_date < ?)");
+                    sqlBuilder.append(String.format("(%screated_date < ? OR %slast_changed_date < ?)", colPrefix, colPrefix));
                     Object parsedVal = dataHelper.parseIfDateTime(condition.value());
                     queryParams.add(parsedVal);
                     queryParams.add(parsedVal);
                 } else {
-                    sqlBuilder.append(String.format("%s < ?", condition.column()));
+                    sqlBuilder.append(String.format("%s%s < ?", colPrefix, condition.column()));
                     queryParams.add(dataHelper.parseIfDateTime(condition.value()));
                 }
             }
             case AFTER -> {
                 if (validNonAuditQuery) {
-                    sqlBuilder.append("(created_date > ? OR last_changed_date > ?)");
+                    sqlBuilder.append(String.format("(%screated_date > ? OR %slast_changed_date > ?)", colPrefix, colPrefix));
                     Object parsedVal = dataHelper.parseIfDateTime(condition.value());
                     queryParams.add(parsedVal);
                     queryParams.add(parsedVal);
                 } else {
-                    sqlBuilder.append(String.format("%s > ?", condition.column()));
+                    sqlBuilder.append(String.format("%s%s > ?", colPrefix, condition.column()));
                     queryParams.add(dataHelper.parseIfDateTime(condition.value()));
                 }
             }
             default -> {
-                sqlBuilder.append(String.format("%s %s ?", condition.column(), op.getValue()));
+                sqlBuilder.append(String.format("%s%s %s ?", colPrefix, condition.column(), op.getValue()));
                 queryParams.add(condition.value());
             }
         }
     }
 
-    private void handleBetween(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams, boolean isAuditQuery) {
+    private void handleBetween(QueryRequest.Condition condition, StringBuilder sqlBuilder, List<Object> queryParams, boolean isAuditQuery, String tablePrefix) {
         Object value = condition.value();
         List<Object> parsedValues = new ArrayList<>();
 
@@ -324,12 +363,13 @@ public class DataService implements IDataService {
             }
         }
 
+        String colPrefix = (tablePrefix != null && !tablePrefix.isEmpty()) ? tablePrefix + "." : "";
         if (!isAuditQuery && !"created_date".equalsIgnoreCase(condition.column()) && !"last_changed_date".equalsIgnoreCase(condition.column())) {
-            sqlBuilder.append("((created_date BETWEEN ? AND ?) OR (last_changed_date BETWEEN ? AND ?))");
+            sqlBuilder.append(String.format("((%screated_date BETWEEN ? AND ?) OR (%slast_changed_date BETWEEN ? AND ?))", colPrefix, colPrefix));
             queryParams.add(parsedValues.get(0));
             queryParams.add(parsedValues.get(1));
         } else {
-            sqlBuilder.append(String.format("%s BETWEEN ? AND ?", condition.column()));
+            sqlBuilder.append(String.format("%s%s BETWEEN ? AND ?", colPrefix, condition.column()));
         }
         queryParams.add(parsedValues.get(0));
         queryParams.add(parsedValues.get(1));
@@ -457,6 +497,7 @@ public class DataService implements IDataService {
         }
         if (metadata.getTableContext() != null) {
             metadata.getTableContext().setLastUpdaterId(userId);
+            metadata.getTableContext().setLastChangedDate(LocalDateTime.now());
         }
 
         if (metadata.getIsAuditEnabled() != null && metadata.getIsAuditEnabled()) {
@@ -516,7 +557,7 @@ public class DataService implements IDataService {
             values.add(auditReq.userId() != null ? auditReq.userId() : 0L);
 
             if (auditReq.rowData() != null && metadata.getColumns() != null) {
-                for (var col : metadata.getColumns()) {
+                for (ColumnMetadata col : metadata.getColumns()) {
                     String colName = col.getColumnName();
                     Object val = auditReq.rowData().entrySet().stream()
                             .filter(e -> e.getKey().equalsIgnoreCase(colName))
@@ -600,16 +641,25 @@ public class DataService implements IDataService {
                     }
                 }
                 if (!fkValues.isEmpty()) {
+                    String relatedCol = match.targetColumn() != null ? match.targetColumn() : "id";
                     String placeholders = fkValues.stream().map(v -> "?").collect(Collectors.joining(", "));
-                    String sql = String.format("SELECT * FROM %s WHERE id IN (%s)", targetTable, placeholders);
+                    String sql = String.format("SELECT * FROM %s WHERE %s IN (%s)", targetTable, relatedCol, placeholders);
                     List<Map<String, Object>> targetRows = jdbcTemplate.queryForList(sql, fkValues.toArray());
 
                     Map<Object, Map<String, Object>> targetMap = new HashMap<>();
                     for (Map<String, Object> tRow : targetRows) {
-                        Object idVal = tRow.get("id");
-                        if (idVal != null) {
-                            targetMap.put(String.valueOf(idVal), tRow);
-                            targetMap.put(idVal, tRow);
+                        Object targetVal = tRow.get(relatedCol);
+                        if (targetVal == null) {
+                            for (Map.Entry<String, Object> entry : tRow.entrySet()) {
+                                if (entry.getKey().equalsIgnoreCase(relatedCol)) {
+                                    targetVal = entry.getValue();
+                                    break;
+                                }
+                            }
+                        }
+                        if (targetVal != null) {
+                            targetMap.put(String.valueOf(targetVal), tRow);
+                            targetMap.put(targetVal, tRow);
                         }
                     }
 

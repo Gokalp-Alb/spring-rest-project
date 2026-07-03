@@ -6,8 +6,10 @@ import com.springrest.springrestproject.dto.request.relation.DirectRelationReque
 import com.springrest.springrestproject.dto.request.relation.ManyToManyInsertRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyRelationRequest;
 import com.springrest.springrestproject.dto.response.relation.RelationResponse;
+import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.relation.DeletePolicy;
+import com.springrest.springrestproject.model.relation.RelationJoinType;
 import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
@@ -19,12 +21,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.ArrayList;
 import java.util.stream.Collectors;
-import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
-import com.springrest.springrestproject.model.relation.RelationJoinType;
+
 @Service
 @RequiredArgsConstructor
 public class RelationService implements IRelationService {
@@ -252,6 +253,7 @@ public class RelationService implements IRelationService {
     @Override
     public List<RelationResponse> getAllRelations() {
         List<ColumnMetadata> relColumns = tableMetadataRepo.findAllRelationColumns();
+        List<String> junctionTableNames = tableMetadataRepo.findJunctionTableNames();
         
         Map<String, List<ColumnMetadata>> byTable = relColumns.stream()
                 .collect(Collectors.groupingBy(ColumnMetadata::getTableName));
@@ -261,12 +263,7 @@ public class RelationService implements IRelationService {
         for (Map.Entry<String, List<ColumnMetadata>> entry : byTable.entrySet()) {
             String tableName = entry.getKey();
             List<ColumnMetadata> cols = entry.getValue();
-
-            TableMetadata tableMeta = tableMetadataRepo.findByTableName(tableName).orElse(null);
-            boolean isJunction = tableMeta != null && tableMeta.getColumns() != null
-                    && tableMeta.getColumns().size() == 2
-                    && cols.size() == 2
-                    && cols.stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+            boolean isJunction = junctionTableNames.contains(tableName) && cols.size() == 2;
 
             if (isJunction) {
                 ColumnMetadata c1 = cols.get(0);
@@ -302,6 +299,7 @@ public class RelationService implements IRelationService {
         List<ResolvedRelation> relations = new ArrayList<>();
 
         List<ColumnMetadata> allRelCols = tableMetadataRepo.findAllRelationColumns();
+        List<String> junctionTableNames = tableMetadataRepo.findJunctionTableNames();
 
         Map<String, List<ColumnMetadata>> colsByTable = allRelCols.stream()
                 .collect(Collectors.groupingBy(ColumnMetadata::getTableName));
@@ -310,11 +308,7 @@ public class RelationService implements IRelationService {
             String table = entry.getKey();
             List<ColumnMetadata> cols = entry.getValue();
 
-            TableMetadata tableMeta = tableMetadataRepo.findByTableName(table).orElse(null);
-            boolean isJunction = tableMeta != null && tableMeta.getColumns() != null
-                    && tableMeta.getColumns().size() == 2
-                    && cols.size() == 2
-                    && cols.stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+            boolean isJunction = junctionTableNames.contains(table) && cols.size() == 2;
 
             if (isJunction) {
                 ColumnMetadata c1 = cols.get(0);
@@ -332,12 +326,9 @@ public class RelationService implements IRelationService {
             }
         }
 
-        TableMetadata baseTableMeta = tableMetadataRepo.findByTableName(tableName).orElse(null);
-        boolean isBaseJunction = baseTableMeta != null && baseTableMeta.getColumns() != null
-                && baseTableMeta.getColumns().size() == 2
+        boolean isBaseJunction = junctionTableNames.contains(tableName)
                 && colsByTable.containsKey(tableName)
-                && colsByTable.get(tableName).size() == 2
-                && colsByTable.get(tableName).stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+                && colsByTable.get(tableName).size() == 2;
 
         if (!isBaseJunction) {
             List<ColumnMetadata> baseCols = colsByTable.getOrDefault(tableName, List.of());
@@ -353,11 +344,7 @@ public class RelationService implements IRelationService {
                     continue;
                 }
                 List<ColumnMetadata> cols = entry.getValue();
-                TableMetadata otherTableMeta = tableMetadataRepo.findByTableName(otherTable).orElse(null);
-                boolean isOtherJunction = otherTableMeta != null && otherTableMeta.getColumns() != null
-                        && otherTableMeta.getColumns().size() == 2
-                        && cols.size() == 2
-                        && cols.stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
+                boolean isOtherJunction = junctionTableNames.contains(otherTable) && cols.size() == 2;
 
                 if (!isOtherJunction) {
                     for (ColumnMetadata col : cols) {

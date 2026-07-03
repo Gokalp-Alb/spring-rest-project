@@ -5,6 +5,7 @@ import com.springrest.springrestproject.core.response.ApiResponse;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
+import com.springrest.springrestproject.service.interfaces.IJsonSchemaGeneratorService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import java.util.Map;
 
 
 @RestController
@@ -23,6 +25,7 @@ public class TableController {
 
     private final IMetadataService metadataService;
     private final TableMapper tableMapper;
+    private final IJsonSchemaGeneratorService jsonSchemaGeneratorService;
 
 
     @PostMapping("/{tableName}")
@@ -65,5 +68,12 @@ public class TableController {
             @PathVariable String tableName) {
         TableResponse tr = metadataService.deleteTableByName(tableName, jwt.getClaim("userId"));
         return ApiResponse.success(HttpStatus.OK.value(), tr);
+    }
+
+    @GetMapping("/jsonSchema/{tableName}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Map<String, Object>> getJsonSchema(@PathVariable String tableName) {
+        Map<String, Object> schema = jsonSchemaGeneratorService.generateSchemaForTable(tableName);
+        return ApiResponse.success(HttpStatus.OK.value(), schema);
     }
 }
