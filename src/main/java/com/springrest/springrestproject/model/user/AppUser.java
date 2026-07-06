@@ -1,12 +1,12 @@
 package com.springrest.springrestproject.model.user;
 
-import lombok.*;
+import lombok.Builder;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor
-public class AppUser {
-    private Long id;
-    private String username;
-    private String password;
-    private Role role;
-    private Boolean active;
-}
+@Builder
+public record AppUser(
+    Long id,
+    String username,
+    String password,
+    Role role,
+    Boolean active
+) {}

@@ -30,12 +30,12 @@ public class TableMetadataCacheService {
     public void put(TableMetadata metadata) {
         try {
             redisTemplate.opsForValue().set(
-                    "table-metadata:" + metadata.getTableName(),
+                    "table-metadata:" + metadata.tableName(),
                     metadata,
                     Duration.ofMinutes(30)
             );
         } catch (RedisConnectionFailureException e) {
-            log.warn("Redis unavailable, skipping cache write for {}", metadata.getTableName());
+            log.warn("Redis unavailable, skipping cache write for {}", metadata.tableName());
         }
     }
 

@@ -27,20 +27,24 @@ public class UserService implements IUserService {
     @Override
     @Transactional
     public UserRequest createUser(AppUser user, Long userId) {
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
-        user.setActive(true);
-        AppUser savedUser = userRepo.save(user);
+        AppUser userToSave = AppUser.builder()
+                .username(user.username())
+                .password(passwordEncoder.encode(user.password()))
+                .role(user.role())
+                .active(true)
+                .build();
+        AppUser savedUser = userRepo.save(userToSave);
         String simulatedSql = String.format(
                 "INSERT INTO app_user (id, username, role, active) VALUES (%d, '%s', '%s', true);",
-                savedUser.getId(),
-                savedUser.getUsername(),
-                savedUser.getRole().name()
+                savedUser.id(),
+                savedUser.username(),
+                savedUser.role().name()
         );
         metadataService.logSchemaChange("app_user", simulatedSql, userId);
         return new UserRequest(
-                savedUser.getId(),
-                savedUser.getUsername(),
-                savedUser.getRole(),
+                savedUser.id(),
+                savedUser.username(),
+                savedUser.role(),
                 "********"
         );
     }
@@ -57,9 +61,9 @@ public class UserService implements IUserService {
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         return new UserRequest(
-                user.getId(),
-                user.getUsername(),
-                user.getRole(),
+                user.id(),
+                user.username(),
+                user.role(),
                 "********"
         );
     }
@@ -70,9 +74,9 @@ public class UserService implements IUserService {
         AppUser user = userRepo.findByUsername(name)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
         return new UserRequest(
-                user.getId(),
-                user.getUsername(),
-                user.getRole(),
+                user.id(),
+                user.username(),
+                user.role(),
                 "********"
         );
     }
@@ -89,12 +93,18 @@ public class UserService implements IUserService {
     public void deleteUserById(Long id, Long userId) {
         AppUser user = userRepo.findById(id)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
-        if(!user.getActive()){
+        if(!Boolean.TRUE.equals(user.active())){
             throw new ApplicationException(ErrorCode.ALREADY_DELETED);
         }
-        user.setActive(false);
+        AppUser updatedUser = AppUser.builder()
+                .id(user.id())
+                .username(user.username())
+                .password(user.password())
+                .role(user.role())
+                .active(false)
+                .build();
         String simulatedSql = String.format("UPDATE app_users SET active = false WHERE id = %d;", id);
         metadataService.logSchemaChange("app_users", simulatedSql, userId);
-        userRepo.save(user);
+        userRepo.save(updatedUser);
     }
 }

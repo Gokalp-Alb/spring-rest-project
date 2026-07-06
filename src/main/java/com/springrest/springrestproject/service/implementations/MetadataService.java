@@ -4,6 +4,7 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
+import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.model.SystemDdlLog;
 import com.springrest.springrestproject.model.column.ColumnContext;
@@ -15,8 +16,11 @@ import com.springrest.springrestproject.model.table.TableContext;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.SystemDdlLogRepo;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
+import com.springrest.springrestproject.model.relation.RelationMetadata;
+import com.springrest.springrestproject.repository.RelationMetadataRepo;
 import com.springrest.springrestproject.service.implementations.redis.RelationCacheService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
+import com.springrest.springrestproject.service.interfaces.IRelationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -27,7 +31,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,10 +43,12 @@ import java.util.stream.Collectors;
 public class MetadataService implements IMetadataService {
 
     private final TableMetadataRepo tableMetadataRepo;
+    private final RelationMetadataRepo relationMetadataRepo;
     private final JdbcTemplate jdbcTemplate;
     private final SystemDdlLogRepo ddlLogRepo;
     private final TableMapper tableMapper;
     private final RelationCacheService relationCacheService;
+    private final IRelationService relationService;
 
     @Override
     @Transactional
@@ -52,8 +62,8 @@ public class MetadataService implements IMetadataService {
         List<String> colDefs = new ArrayList<>();
 
         for (ColumnMetadata col : augmentedColumns) {
-            String columnDef = col.getColumnName() + " " + col.getDataType();
-            if (col.getColumnContext() != null && col.getColumnContext().getIsUnique()) {
+            String columnDef = col.columnName() + " " + col.dataType();
+            if (col.columnContext() != null && Boolean.TRUE.equals(col.columnContext().isUnique())) {
                 columnDef += " UNIQUE";
             }
             colDefs.add(columnDef);
@@ -70,7 +80,7 @@ public class MetadataService implements IMetadataService {
         if (request.isAuditEnabled() != null && request.isAuditEnabled()) {
             String logTableName = tableName + "_log";
             String logColumnsSql = augmentedColumns.stream()
-                    .map(col -> col.getColumnName() + " " + col.getDataType())
+                    .map(col -> col.columnName() + " " + col.dataType())
                     .collect(Collectors.joining(", "));
             String logColumnsStr = logColumnsSql.isEmpty() ? "" : ", " + logColumnsSql;
             String createLogTableSql = String.format(
@@ -80,40 +90,34 @@ public class MetadataService implements IMetadataService {
             jdbcTemplate.execute(createLogTableSql);
         }
 
-        TableContext tableContext = new TableContext();
-        tableContext.setCreatorId(userId);
-        tableContext.setCreatedDate(LocalDateTime.now());
-        tableContext.setLastUpdaterId(userId);
-        tableContext.setLastChangedDate(LocalDateTime.now());
+        TableContext tableContext = new TableContext(userId, LocalDateTime.now(), userId, LocalDateTime.now());
 
         List<ColumnMetadata> domainColumns = augmentedColumns.stream().map(srcCol -> {
-            ColumnMetadata targetCol = new ColumnMetadata();
-            targetCol.setColumnName(srcCol.getColumnName());
-            targetCol.setDataType(srcCol.getDataType());
-            targetCol.setRelationType(null); // Ignore any relation mapping
-            targetCol.setRelatedTable(null);
-            targetCol.setRelatedColumn(null);
-            targetCol.setDeletePolicy(null);
+            ColumnContext srcCtx = srcCol.columnContext();
+            ColumnContext targetCtx = ColumnContext.builder()
+                    .creatorId(userId)
+                    .createdDate(LocalDateTime.now())
+                    .lastUpdaterId(userId)
+                    .lastChangedDate(LocalDateTime.now())
+                    .isSensitive(srcCtx != null && Boolean.TRUE.equals(srcCtx.isSensitive()))
+                    .isUnique(srcCtx != null && Boolean.TRUE.equals(srcCtx.isUnique()))
+                    .validationRegex(srcCtx != null ? srcCtx.validationRegex() : null)
+                    .build();
 
-            ColumnContext srcCtx = srcCol.getColumnContext();
-            ColumnContext targetCtx = new ColumnContext();
-            targetCtx.setCreatorId(userId);
-            targetCtx.setCreatedDate(LocalDateTime.now());
-            targetCtx.setLastUpdaterId(userId);
-            targetCtx.setLastChangedDate(LocalDateTime.now());
-            targetCtx.setIsSensitive(srcCtx != null && srcCtx.getIsSensitive() != null ? srcCtx.getIsSensitive() : false);
-            targetCtx.setIsUnique(srcCtx != null && srcCtx.getIsUnique() != null ? srcCtx.getIsUnique() : false);
-            targetCtx.setValidationRegex(srcCtx != null ? srcCtx.getValidationRegex() : null);
-
-            targetCol.setColumnContext(targetCtx);
-            return targetCol;
+            return ColumnMetadata.builder()
+                    .columnName(srcCol.columnName())
+                    .dataType(srcCol.dataType())
+                    .columnContext(targetCtx)
+                    .tableName(tableName)
+                    .build();
         }).toList();
 
-        TableMetadata metadata = new TableMetadata();
-        metadata.setTableName(tableName);
-        metadata.setColumns(domainColumns);
-        metadata.setTableContext(tableContext);
-        metadata.setIsAuditEnabled(request.isAuditEnabled() != null ? request.isAuditEnabled() : false);
+        TableMetadata metadata = TableMetadata.builder()
+                .tableName(tableName)
+                .columns(domainColumns)
+                .tableContext(tableContext)
+                .isAuditEnabled(request.isAuditEnabled() != null ? request.isAuditEnabled() : false)
+                .build();
 
         return tableMetadataRepo.save(metadata);
     }
@@ -147,55 +151,62 @@ public class MetadataService implements IMetadataService {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
 
-        List<ColumnMetadata> referencingColumns = tableMetadataRepo.getIncomingFKs(tableName);
+        List<RelationMetadata> relations = relationMetadataRepo.findByTableName(tableName);
 
         boolean useCascade = false;
         
-        for (ColumnMetadata fkCol : referencingColumns) {
-            TableMetadata parentTable = tableMetadataRepo.findByTableName(fkCol.getTableName())
-                    .orElse(null);
-            boolean isJunction = parentTable != null && parentTable.getColumns() != null 
-                                 && parentTable.getColumns().size() == 2 
-                                 && parentTable.getColumns().stream().allMatch(c -> c.getRelationType() == RelationType.MANY_TO_ONE);
-                                 
-            DeletePolicy policy = fkCol.getDeletePolicy() != null ? fkCol.getDeletePolicy() : DeletePolicy.CASCADE;
-            
-            if (policy == DeletePolicy.RESTRICT || policy == DeletePolicy.NO_ACTION) {
-                throw new ApplicationException(ErrorCode.RELATION_RESTRICT, fkCol.getTableName());
-            }
-
-            if (isJunction) {
-                String dropJunctionSql = String.format("DROP TABLE IF EXISTS %s CASCADE;", fkCol.getTableName());
-                logSchemaChange(fkCol.getTableName(), dropJunctionSql, userId);
+        for (RelationMetadata rel : relations) {
+            if (rel.relationType() == RelationType.MANY_TO_MANY) {
+                String junctionTable = rel.junctionTable();
+                String dropJunctionSql = String.format("DROP TABLE IF EXISTS %s CASCADE;", junctionTable);
+                logSchemaChange(junctionTable, dropJunctionSql, userId);
                 jdbcTemplate.execute(dropJunctionSql);
                 
-                tableMetadataRepo.findByTableName(fkCol.getTableName()).ifPresent(tableMetadataRepo::delete);
+                tableMetadataRepo.findByTableName(junctionTable).ifPresent(tableMetadataRepo::delete);
+                relationMetadataRepo.delete(rel);
                 
-                for (ColumnMetadata jCol : parentTable.getColumns()) {
-                    if (jCol.getRelatedTable() != null && !jCol.getRelatedTable().equalsIgnoreCase(tableName)) {
-                        relationCacheService.evict(jCol.getRelatedTable());
-                    }
+                String otherTable = rel.sourceTable().equalsIgnoreCase(tableName) ? rel.targetTable() : rel.sourceTable();
+                relationCacheService.evict(otherTable);
+            } else if (rel.targetTable().equalsIgnoreCase(tableName)) {
+                TableMetadata childTable = tableMetadataRepo.findByTableName(rel.sourceTable()).orElse(null);
+                DeletePolicy policy = rel.sourceDeletePolicy() != null ? rel.sourceDeletePolicy() : DeletePolicy.CASCADE;
+                
+                if (policy == DeletePolicy.RESTRICT || policy == DeletePolicy.NO_ACTION) {
+                    throw new ApplicationException(ErrorCode.RELATION_RESTRICT, rel.sourceTable());
                 }
-            } else {
+
                 String dropColSql = String.format("ALTER TABLE %s DROP COLUMN IF EXISTS %s CASCADE;",
-                        fkCol.getTableName(), fkCol.getColumnName());
-                logSchemaChange(fkCol.getTableName(), dropColSql, userId);
+                        rel.sourceTable(), rel.sourceColumn());
+                logSchemaChange(rel.sourceTable(), dropColSql, userId);
                 jdbcTemplate.execute(dropColSql);
 
-                if (parentTable != null && Boolean.TRUE.equals(parentTable.getIsAuditEnabled())) {
+                if (childTable != null && Boolean.TRUE.equals(childTable.isAuditEnabled())) {
                     String dropLogColSql = String.format("ALTER TABLE %s_log DROP COLUMN IF EXISTS %s CASCADE;",
-                            fkCol.getTableName(), fkCol.getColumnName());
-                    logSchemaChange(fkCol.getTableName() + "_log", dropLogColSql, userId);
+                            rel.sourceTable(), rel.sourceColumn());
+                    logSchemaChange(rel.sourceTable() + "_log", dropLogColSql, userId);
                     jdbcTemplate.execute(dropLogColSql);
                 }
 
-                if (parentTable != null) {
-                    parentTable.getColumns().removeIf(c -> c.getColumnName().equalsIgnoreCase(fkCol.getColumnName()));
-                    tableMetadataRepo.save(parentTable);
+                if (childTable != null) {
+                    List<ColumnMetadata> updatedCols = new ArrayList<>(childTable.columns());
+                    updatedCols.removeIf(c -> c.columnName().equalsIgnoreCase(rel.sourceColumn()));
+                    TableMetadata updatedChildTable = TableMetadata.builder()
+                            .id(childTable.id())
+                            .tableName(childTable.tableName())
+                            .columns(updatedCols)
+                            .tableContext(childTable.tableContext())
+                            .isAuditEnabled(childTable.isAuditEnabled())
+                            .build();
+                    tableMetadataRepo.save(updatedChildTable);
                 }
+                
+                relationMetadataRepo.delete(rel);
+                
                 if (policy == DeletePolicy.CASCADE) {
                     useCascade = true;
                 }
+            } else if (rel.sourceTable().equalsIgnoreCase(tableName)) {
+                relationMetadataRepo.delete(rel);
             }
         }
 
@@ -206,22 +217,14 @@ public class MetadataService implements IMetadataService {
         logSchemaChange(tableName, dropTableSql, userId);
         jdbcTemplate.execute(dropTableSql);
         
-        if (metadata.getColumns() != null) {
-            for (ColumnMetadata col : metadata.getColumns()) {
-                if (col.getRelatedTable() != null) {
-                    relationCacheService.evict(col.getRelatedTable());
-                }
-            }
-        }
-        
         tableMetadataRepo.delete(metadata);
         relationCacheService.evict(tableName);
         
         return new TableResponse(
-                metadata.getId(),
+                metadata.id(),
                 tableName,
-                metadata.getColumns(),
-                metadata.getTableContext()
+                metadata.columns(),
+                metadata.tableContext()
         );
     }
 
@@ -240,31 +243,152 @@ public class MetadataService implements IMetadataService {
     private List<ColumnMetadata> createSystemColumns() {
         SystemColumn sysCols = SystemColumn.defaults();
 
-        ColumnMetadata c1 = new ColumnMetadata();
-        c1.setColumnName(sysCols.creatorId().name());
-        c1.setDataType(sysCols.creatorId().type());
+        ColumnContext defaultCtx = ColumnContext.builder()
+                .isUnique(false)
+                .isSensitive(false)
+                .build();
 
-        ColumnMetadata c2 = new ColumnMetadata();
-        c2.setColumnName(sysCols.createdDate().name());
-        c2.setDataType(sysCols.createdDate().type());
+        ColumnMetadata c1 = ColumnMetadata.builder()
+                .columnName(sysCols.creatorId().name())
+                .dataType(sysCols.creatorId().type())
+                .columnContext(defaultCtx)
+                .build();
 
-        ColumnMetadata c3 = new ColumnMetadata();
-        c3.setColumnName(sysCols.lastUpdaterId().name());
-        c3.setDataType(sysCols.lastUpdaterId().type());
+        ColumnMetadata c2 = ColumnMetadata.builder()
+                .columnName(sysCols.createdDate().name())
+                .dataType(sysCols.createdDate().type())
+                .columnContext(defaultCtx)
+                .build();
 
-        ColumnMetadata c4 = new ColumnMetadata();
-        c4.setColumnName(sysCols.lastChangedDate().name());
-        c4.setDataType(sysCols.lastChangedDate().type());
+        ColumnMetadata c3 = ColumnMetadata.builder()
+                .columnName(sysCols.lastUpdaterId().name())
+                .dataType(sysCols.lastUpdaterId().type())
+                .columnContext(defaultCtx)
+                .build();
 
-        List<ColumnMetadata> sysColMeta = List.of(c1, c2, c3, c4);
+        ColumnMetadata c4 = ColumnMetadata.builder()
+                .columnName(sysCols.lastChangedDate().name())
+                .dataType(sysCols.lastChangedDate().type())
+                .columnContext(defaultCtx)
+                .build();
 
-        for (ColumnMetadata cm : sysColMeta) {
-            ColumnContext ctx = new ColumnContext();
-            ctx.setIsUnique(false);
-            ctx.setIsSensitive(false);
-            cm.setColumnContext(ctx);
-        }
-        return sysColMeta;
+        return List.of(c1, c2, c3, c4);
     }
 
+
+    @Override
+    public Map<String, Object> generateSchemaForTable(String tableName) {
+        Map<String, Map<String, Object>> defs = new LinkedHashMap<>();
+
+        generateTableSchemaInternal(tableName, defs);
+
+        Map<String, Object> rootSchema = new LinkedHashMap<>();
+        rootSchema.put("$schema", "http://json-schema.org/draft-07/schema#");
+        rootSchema.put("$ref", "#/$defs/" + tableName);
+        rootSchema.put("$defs", defs);
+
+        return rootSchema;
+    }
+
+    private void generateTableSchemaInternal(String tableName, Map<String, Map<String, Object>> defs) {
+        if (defs.containsKey(tableName)) {
+            return;
+        }
+
+        Map<String, Object> tableSchema = new LinkedHashMap<>();
+        defs.put(tableName, tableSchema);
+
+        TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+
+        tableSchema.put("type", "object");
+        tableSchema.put("title", tableName);
+
+        Map<String, Object> properties = new LinkedHashMap<>();
+        tableSchema.put("properties", properties);
+
+        // PK and System Columns
+        properties.put("id", Map.of("type", "integer"));
+        properties.put("creator_id", Map.of("type", "integer"));
+        properties.put("created_date", Map.of("type", "string", "format", "date-time"));
+        properties.put("last_updater_id", Map.of("type", "integer"));
+        properties.put("last_changed_date", Map.of("type", "string", "format", "date-time"));
+
+        // Table Columns
+        if (metadata.columns() != null) {
+            for (ColumnMetadata col : metadata.columns()) {
+                properties.put(col.columnName(), parseDataTypeToJsonSchema(col.dataType()));
+            }
+        }
+
+        // Relations
+        List<ResolvedRelation> relations = relationService.getRelationsForTable(tableName);
+        if (relations != null) {
+            for (ResolvedRelation rel : relations) {
+                generateTableSchemaInternal(rel.targetTable(), defs);
+
+                Map<String, Object> relationProperty = new LinkedHashMap<>();
+                relationProperty.put("type", "array");
+                relationProperty.put("items", Map.of("$ref", "#/$defs/" + rel.targetTable()));
+
+                properties.put(rel.relationName(), relationProperty);
+            }
+        }
+    }
+
+    private Map<String, Object> parseDataTypeToJsonSchema(String dataType) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        if (dataType == null) {
+            schema.put("type", "string");
+            return schema;
+        }
+
+        String cleaned = dataType.trim().toUpperCase();
+
+        // VARCHAR(n)
+        Pattern varcharPattern = Pattern.compile("^(VARCHAR|CHARACTER VARYING|CHAR)\\s*\\(\\s*(\\d+)\\s*\\)$");
+        Matcher varcharMatcher = varcharPattern.matcher(cleaned);
+        if (varcharMatcher.matches()) {
+            schema.put("type", "string");
+            schema.put("maxLength", Integer.parseInt(varcharMatcher.group(2)));
+            return schema;
+        }
+
+        // TEXT / CLOB
+        if (cleaned.startsWith("TEXT") || cleaned.startsWith("CLOB")) {
+            schema.put("type", "string");
+            return schema;
+        }
+
+        // integers
+        if (cleaned.startsWith("INT") || cleaned.startsWith("INTEGER") || cleaned.startsWith("SERIAL")
+                || cleaned.startsWith("BIGINT") || cleaned.startsWith("BIGSERIAL") || cleaned.startsWith("SMALLINT")) {
+            schema.put("type", "integer");
+            return schema;
+        }
+
+        // decimal / float
+        if (cleaned.startsWith("NUMERIC") || cleaned.startsWith("DECIMAL") || cleaned.startsWith("REAL")
+                || cleaned.startsWith("DOUBLE") || cleaned.startsWith("FLOAT")) {
+            schema.put("type", "number");
+            return schema;
+        }
+
+        // boolean
+        if (cleaned.startsWith("BOOLEAN") || cleaned.startsWith("BOOL")) {
+            schema.put("type", "boolean");
+            return schema;
+        }
+
+        // date/time
+        if (cleaned.startsWith("TIMESTAMP") || cleaned.startsWith("DATE") || cleaned.startsWith("TIME")) {
+            schema.put("type", "string");
+            schema.put("format", "date-time");
+            return schema;
+        }
+
+        // Default fallback
+        schema.put("type", "string");
+        return schema;
+    }
 }

@@ -6,6 +6,8 @@ import com.springrest.springrestproject.model.table.TableMetadata;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.Map;
+
 
 public interface IMetadataService {
     TableMetadata createTable(String tablename, TableCreateRequest request, Long userId);
@@ -14,4 +16,5 @@ public interface IMetadataService {
     TableResponse deleteTableByName(String tableName, Long userId);
     void logSchemaChange(String tableName, String sql, Long userId);
     TableResponse getTableByName(String tableId);
+    Map<String, Object> generateSchemaForTable(String tableName);
 }

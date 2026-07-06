@@ -28,11 +28,12 @@ public class AdminInitializerConfig {
         return args -> {
             boolean adminExists = userRepo.existsByRole(Role.ADMIN);
             if (!adminExists) {
-                AppUser defaultAdmin = new AppUser();
-                defaultAdmin.setUsername(adminUsername);
-                defaultAdmin.setPassword(passwordEncoder.encode(adminPassword));
-                defaultAdmin.setRole(Role.ADMIN);
-                defaultAdmin.setActive(true);
+                AppUser defaultAdmin = AppUser.builder()
+                        .username(adminUsername)
+                        .password(passwordEncoder.encode(adminPassword))
+                        .role(Role.ADMIN)
+                        .active(true)
+                        .build();
                 userRepo.save(defaultAdmin);
             }
         };

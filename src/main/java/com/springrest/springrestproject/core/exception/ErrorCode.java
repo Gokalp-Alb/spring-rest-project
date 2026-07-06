@@ -12,6 +12,7 @@ public enum ErrorCode {
     ALREADY_DELETED(HttpStatus.BAD_REQUEST, "error.already_deleted"),
     VALIDATION_FAILED(HttpStatus.BAD_REQUEST, "error.validation_failed"),
     INVALID_REGEX_PATTERN(HttpStatus.BAD_REQUEST, "error.invalid_regex_pattern"),
+    INVALID_REGEX_PATTERN_CREATION(HttpStatus.BAD_REQUEST, "error.invalid_regex_pattern_creation"),
     DUPLICATE_RESOURCE(HttpStatus.CONFLICT, "error.duplicate_resource"),
     DUPLICATE_TABLE_NAME(HttpStatus.CONFLICT, "error.duplicate_table_name"),
     INVALID_OPERATOR(HttpStatus.BAD_REQUEST, "error.invalid_operator"),

@@ -1,14 +1,14 @@
 package com.springrest.springrestproject.model.table;
 
 import com.springrest.springrestproject.model.column.ColumnMetadata;
-import lombok.*;
+import lombok.Builder;
 import java.util.List;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor
-public class TableMetadata {
-    private Long id;
-    private String tableName;
-    private List<ColumnMetadata> columns;
-    private TableContext tableContext;
-    private Boolean isAuditEnabled;
-}
+@Builder
+public record TableMetadata(
+    Long id,
+    String tableName,
+    List<ColumnMetadata> columns,
+    TableContext tableContext,
+    Boolean isAuditEnabled
+) {}

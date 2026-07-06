@@ -8,10 +8,10 @@ import org.springframework.stereotype.Component;
 public class TableMapper {
     public TableResponse toResponse(TableMetadata metadata) {
         return new TableResponse(
-                metadata.getId(),
-                metadata.getTableName(),
-                metadata.getColumns(),
-                metadata.getTableContext()
+                metadata.id(),
+                metadata.tableName(),
+                metadata.columns(),
+                metadata.tableContext()
         );
     }
 }

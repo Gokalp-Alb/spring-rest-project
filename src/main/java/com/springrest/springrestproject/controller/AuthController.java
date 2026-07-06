@@ -37,16 +37,16 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<String>> login(@RequestBody LoginRequest loginRequest) throws Exception {
         AppUser user = userService.findByUsername(loginRequest.username());
-        if (!passwordEncoder.matches(loginRequest.password(), user.getPassword())) {
+        if (!passwordEncoder.matches(loginRequest.password(), user.password())) {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
         }
         JWTClaimsSet claimsSet = new JWTClaimsSet.Builder()
-                .subject(user.getUsername())
+                .subject(user.username())
                 .issuer("com.springrest.project")
                 .issueTime(new Date())
                 .expirationTime(new Date(new Date().getTime() + 86400000)) // 24 hours lifetime
-                .claim("userId", user.getId())
-                .claim("roles", "ROLE_" + user.getRole().name())
+                .claim("userId", user.id())
+                .claim("roles", "ROLE_" + user.role().name())
                 .build();
 
         JWSSigner signer = new MACSigner(tokenSecret.getBytes());

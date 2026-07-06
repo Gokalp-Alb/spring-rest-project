@@ -16,25 +16,32 @@ public class SystemDdlLogRepo{
     private final DSLContext dsl;
 
     @Transactional
-    public void save(SystemDdlLog log) {
-        if (log.getId() == null) {
+    public SystemDdlLog save(SystemDdlLog log) {
+        if (log.id() == null) {
             Long generatedId = Objects.requireNonNull(dsl.insertInto(SYSTEM_DDL_LOG)
-                            .set(SYSTEM_DDL_LOG.TABLE_NAME, log.getTableName())
-                            .set(SYSTEM_DDL_LOG.EXECUTED_SQL, log.getExecutedSql())
-                            .set(SYSTEM_DDL_LOG.USER_ID, log.getUserId())
-                            .set(SYSTEM_DDL_LOG.EXECUTED_AT, log.getExecutedAt())
+                            .set(SYSTEM_DDL_LOG.TABLE_NAME, log.tableName())
+                            .set(SYSTEM_DDL_LOG.EXECUTED_SQL, log.executedSql())
+                            .set(SYSTEM_DDL_LOG.USER_ID, log.userId())
+                            .set(SYSTEM_DDL_LOG.EXECUTED_AT, log.executedAt())
                             .returning(SYSTEM_DDL_LOG.ID)
                             .fetchOne())
                             .getValue(SYSTEM_DDL_LOG.ID);
-            log.setId(generatedId);
+            return SystemDdlLog.builder()
+                    .id(generatedId)
+                    .tableName(log.tableName())
+                    .executedSql(log.executedSql())
+                    .userId(log.userId())
+                    .executedAt(log.executedAt())
+                    .build();
         } else {
             dsl.update(SYSTEM_DDL_LOG)
-                    .set(SYSTEM_DDL_LOG.TABLE_NAME, log.getTableName())
-                    .set(SYSTEM_DDL_LOG.EXECUTED_SQL, log.getExecutedSql())
-                    .set(SYSTEM_DDL_LOG.USER_ID, log.getUserId())
-                    .set(SYSTEM_DDL_LOG.EXECUTED_AT, log.getExecutedAt())
-                    .where(SYSTEM_DDL_LOG.ID.eq(log.getId()))
+                    .set(SYSTEM_DDL_LOG.TABLE_NAME, log.tableName())
+                    .set(SYSTEM_DDL_LOG.EXECUTED_SQL, log.executedSql())
+                    .set(SYSTEM_DDL_LOG.USER_ID, log.userId())
+                    .set(SYSTEM_DDL_LOG.EXECUTED_AT, log.executedAt())
+                    .where(SYSTEM_DDL_LOG.ID.eq(log.id()))
                     .execute();
+            return log;
         }
     }
 }

@@ -1,30 +1,22 @@
 package com.springrest.springrestproject.service.implementations.redis;
 
-import com.redis.testcontainers.RedisContainer;
+import com.springrest.springrestproject.BaseIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
-@Testcontainers
-class RateLimiterServiceIntegrationTest {
+class RateLimiterServiceIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private RateLimiterService rateLimiterService;
 
     @Autowired
     private StringRedisTemplate redisTemplate;
-
-    @Container
-    @ServiceConnection
-    static RedisContainer redisContainer = new RedisContainer("redis:7.2-alpine");
 
     @BeforeEach
     void setUp() {

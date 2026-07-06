@@ -1,12 +1,12 @@
 package com.springrest.springrestproject.service.implementations.essential;
 
+import com.springrest.springrestproject.BaseIntegrationTest;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.relation.DeletePolicy;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
-import com.springrest.springrestproject.service.interfaces.IJsonSchemaGeneratorService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,16 +22,13 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
-public class JsonSchemaGeneratorServiceTest {
+public class JsonSchemaGeneratorServiceTest extends BaseIntegrationTest {
 
     @Autowired
     private IMetadataService metadataService;
 
     @Autowired
     private IRelationService relationService;
-
-    @Autowired
-    private IJsonSchemaGeneratorService jsonSchemaGeneratorService;
 
     @Autowired
     private TableMetadataRepo tableMetadataRepo;
@@ -42,8 +39,14 @@ public class JsonSchemaGeneratorServiceTest {
     private final String parentTable = "schema_parent";
     private final String childTable = "schema_child";
 
+    @Autowired
+    private org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate;
+
     @BeforeEach
     void setUp() {
+        if (redisTemplate.getConnectionFactory() != null) {
+            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        }
         cleanup();
     }
 
@@ -66,24 +69,28 @@ public class JsonSchemaGeneratorServiceTest {
         // Create Parent Table with varied datatypes
         List<ColumnMetadata> parentCols = new ArrayList<>();
 
-        ColumnMetadata nameCol = new ColumnMetadata();
-        nameCol.setColumnName("name");
-        nameCol.setDataType("VARCHAR(120)");
+        ColumnMetadata nameCol = ColumnMetadata.builder()
+                .columnName("name")
+                .dataType("VARCHAR(120)")
+                .build();
         parentCols.add(nameCol);
 
-        ColumnMetadata ageCol = new ColumnMetadata();
-        ageCol.setColumnName("age");
-        ageCol.setDataType("INTEGER");
+        ColumnMetadata ageCol = ColumnMetadata.builder()
+                .columnName("age")
+                .dataType("INTEGER")
+                .build();
         parentCols.add(ageCol);
 
-        ColumnMetadata isEmployeeCol = new ColumnMetadata();
-        isEmployeeCol.setColumnName("is_employee");
-        isEmployeeCol.setDataType("BOOLEAN");
+        ColumnMetadata isEmployeeCol = ColumnMetadata.builder()
+                .columnName("is_employee")
+                .dataType("BOOLEAN")
+                .build();
         parentCols.add(isEmployeeCol);
 
-        ColumnMetadata salaryCol = new ColumnMetadata();
-        salaryCol.setColumnName("salary");
-        salaryCol.setDataType("DECIMAL(10,2)");
+        ColumnMetadata salaryCol = ColumnMetadata.builder()
+                .columnName("salary")
+                .dataType("DECIMAL(10,2)")
+                .build();
         parentCols.add(salaryCol);
 
         metadataService.createTable(parentTable, new TableCreateRequest(parentCols, false), 0L);
@@ -91,9 +98,10 @@ public class JsonSchemaGeneratorServiceTest {
         // Create Child Table
         List<ColumnMetadata> childCols = new ArrayList<>();
         
-        ColumnMetadata titleCol = new ColumnMetadata();
-        titleCol.setColumnName("title");
-        titleCol.setDataType("VARCHAR(80)");
+        ColumnMetadata titleCol = ColumnMetadata.builder()
+                .columnName("title")
+                .dataType("VARCHAR(80)")
+                .build();
         childCols.add(titleCol);
         
         metadataService.createTable(childTable, new TableCreateRequest(childCols, false), 0L);
@@ -102,7 +110,7 @@ public class JsonSchemaGeneratorServiceTest {
         relationService.createManyToOneRelation(new DirectRelationRequest(childTable, "parent_id", parentTable, "id", DeletePolicy.CASCADE), 0L);
 
         // Generate JSON Schema
-        Map<String, Object> schema = jsonSchemaGeneratorService.generateSchemaForTable(parentTable);
+        Map<String, Object> schema = metadataService.generateSchemaForTable(parentTable);
 
         // Assertions
         assertNotNull(schema);

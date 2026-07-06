@@ -63,9 +63,7 @@ public class DataService implements IDataService {
         dataHelper.validateRowRegex(metadata, request.rowData());
         dataHelper.validateRowDates(metadata, request.rowData());
 
-        if (metadata.getTableContext() != null) {
-            metadata.getTableContext().setLastUpdaterId(userId);
-        }
+
 
         Map<String, Object> finalRowData = new HashMap<>(request.rowData());
         SystemColumn sysCols = SystemColumn.defaults();
@@ -410,7 +408,7 @@ public class DataService implements IDataService {
         metadataService.logSchemaChange(tableName, fullSqlForLog, userId);
 
         Map<String, Object> beforeState = null;
-        if (metadata.getIsAuditEnabled() != null && metadata.getIsAuditEnabled()) {
+        if (metadata.isAuditEnabled() != null && metadata.isAuditEnabled()) {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(String.format("SELECT * FROM %s WHERE id = ?;", tableName), id);
             if (!rows.isEmpty()) {
                 beforeState = rows.getFirst();
@@ -421,9 +419,6 @@ public class DataService implements IDataService {
         kafkaPublisher.publishMutation(tableName, "DELETE", Map.of("id", id), userId);
         if (rowsAffected == 0) {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
-        }
-        if (metadata.getTableContext() != null) {
-            metadata.getTableContext().setLastUpdaterId(userId);
         }
 
         if (beforeState != null) {
@@ -495,12 +490,7 @@ public class DataService implements IDataService {
         if (rowsAffected == 0) {
             throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        if (metadata.getTableContext() != null) {
-            metadata.getTableContext().setLastUpdaterId(userId);
-            metadata.getTableContext().setLastChangedDate(LocalDateTime.now());
-        }
-
-        if (metadata.getIsAuditEnabled() != null && metadata.getIsAuditEnabled()) {
+        if (metadata.isAuditEnabled() != null && metadata.isAuditEnabled()) {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(String.format("SELECT * FROM %s WHERE id = ?;", tableName), id);
             if (!rows.isEmpty()) {
                 auditLogMutation(AuditRequest.builder()
@@ -539,8 +529,8 @@ public class DataService implements IDataService {
 
     private void auditLogMutation(AuditRequest auditReq) {
         TableMetadata metadata = auditReq.tableMetadata();
-        if (metadata.getIsAuditEnabled() != null && metadata.getIsAuditEnabled()) {
-            String logTableName = metadata.getTableName() + "_log";
+        if (metadata.isAuditEnabled() != null && metadata.isAuditEnabled()) {
+            String logTableName = metadata.tableName() + "_log";
             List<String> columns = new ArrayList<>();
             List<Object> values = new ArrayList<>();
 
@@ -556,9 +546,9 @@ public class DataService implements IDataService {
             columns.add("user_id");
             values.add(auditReq.userId() != null ? auditReq.userId() : 0L);
 
-            if (auditReq.rowData() != null && metadata.getColumns() != null) {
-                for (ColumnMetadata col : metadata.getColumns()) {
-                    String colName = col.getColumnName();
+            if (auditReq.rowData() != null && metadata.columns() != null) {
+                for (ColumnMetadata col : metadata.columns()) {
+                    String colName = col.columnName();
                     Object val = auditReq.rowData().entrySet().stream()
                             .filter(e -> e.getKey().equalsIgnoreCase(colName))
                             .map(Map.Entry::getValue)
@@ -675,13 +665,12 @@ public class DataService implements IDataService {
                             row.put(relName, List.of());
                         }
                     }
-                    continue;
                 } else {
                     for (Map<String, Object> row : mutableData) {
                         row.put(relName, List.of());
                     }
-                    continue;
                 }
+                continue;
 
             } else if (RelationJoinType.REVERSE == match.type()) {
                 String placeholders = baseIds.stream().map(id -> "?").collect(Collectors.joining(", "));

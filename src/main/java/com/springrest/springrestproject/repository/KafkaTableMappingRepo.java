@@ -43,28 +43,35 @@ public class KafkaTableMappingRepo {
     }
 
     public KafkaTableMapping save(KafkaTableMapping mapping) {
-        if (mapping.getId() == null) {
+        if (mapping.id() == null) {
             Long generatedId = Objects.requireNonNull(dsl.insertInto(KAFKA_TABLE_MAPPINGS)
-                            .set(KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.getTableName())
-                            .set(KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.getKafkaTopic())
-                            .set(KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.getDirection())
-                            .set(KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.isActive())
+                            .set(KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
+                            .set(KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
+                            .set(KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
+                            .set(KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
                             .returning(KAFKA_TABLE_MAPPINGS.ID)
                             .fetchOne())
                     .getValue(KAFKA_TABLE_MAPPINGS.ID);
-            mapping.setId(generatedId);
-            logKafkaTableMappingMutation(mapping, "POST");
+            KafkaTableMapping savedMapping = KafkaTableMapping.builder()
+                    .id(generatedId)
+                    .tableName(mapping.tableName())
+                    .kafkaTopic(mapping.kafkaTopic())
+                    .direction(mapping.direction())
+                    .active(mapping.active())
+                    .build();
+            logKafkaTableMappingMutation(savedMapping, "POST");
+            return savedMapping;
         } else {
             dsl.update(KAFKA_TABLE_MAPPINGS)
-                    .set(KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.getTableName())
-                    .set(KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.getKafkaTopic())
-                    .set(KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.getDirection())
-                    .set(KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.isActive())
-                    .where(KAFKA_TABLE_MAPPINGS.ID.eq(mapping.getId()))
+                    .set(KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
+                    .set(KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
+                    .set(KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
+                    .set(KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
+                    .where(KAFKA_TABLE_MAPPINGS.ID.eq(mapping.id()))
                     .execute();
             logKafkaTableMappingMutation(mapping, "PUT");
+            return mapping;
         }
-        return mapping;
     }
 
     private void logKafkaTableMappingMutation(KafkaTableMapping mapping, String operation) {
@@ -73,11 +80,11 @@ public class KafkaTableMappingRepo {
             executorId = 0L;
         }
         dsl.insertInto(KAFKA_TABLE_MAPPINGS_LOG)
-                .set(KAFKA_TABLE_MAPPINGS_LOG.ID, mapping.getId())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.ACTIVE, mapping.isActive())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.DIRECTION, mapping.getDirection())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.KAFKA_TOPIC, mapping.getKafkaTopic())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.TABLE_NAME, mapping.getTableName())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.ID, mapping.id())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.ACTIVE, mapping.active())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.DIRECTION, mapping.direction())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.KAFKA_TOPIC, mapping.kafkaTopic())
+                .set(KAFKA_TABLE_MAPPINGS_LOG.TABLE_NAME, mapping.tableName())
                 .set(KAFKA_TABLE_MAPPINGS_LOG.OPERATION_TYPE, operation)
                 .set(KAFKA_TABLE_MAPPINGS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
                 .set(KAFKA_TABLE_MAPPINGS_LOG.USER_ID, executorId)

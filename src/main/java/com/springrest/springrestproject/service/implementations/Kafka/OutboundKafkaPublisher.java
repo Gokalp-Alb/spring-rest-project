@@ -26,7 +26,7 @@ public class OutboundKafkaPublisher {
             messagePayload.put("tableName", tableName);
             messagePayload.put("payload", rowData);
 
-            kafkaTemplate.send(mapping.getKafkaTopic(), messagePayload);
+            kafkaTemplate.send(mapping.kafkaTopic(), messagePayload);
         });
     }
 }

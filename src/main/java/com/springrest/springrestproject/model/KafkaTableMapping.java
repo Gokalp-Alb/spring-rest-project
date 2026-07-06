@@ -1,13 +1,12 @@
 package com.springrest.springrestproject.model;
 
-import lombok.*;
+import lombok.Builder;
 
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor
 @Builder
-public class KafkaTableMapping {
-    private Long id;
-    private String tableName;
-    private String kafkaTopic;
-    private String direction;
-    private boolean active;
-}
+public record KafkaTableMapping(
+    Long id,
+    String tableName,
+    String kafkaTopic,
+    String direction,
+    boolean active
+) {}

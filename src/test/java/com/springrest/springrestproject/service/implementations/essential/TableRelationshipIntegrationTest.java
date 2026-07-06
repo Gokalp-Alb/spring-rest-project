@@ -1,15 +1,21 @@
 package com.springrest.springrestproject.service.implementations.essential;
 
+import com.springrest.springrestproject.BaseIntegrationTest;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
+import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyInsertRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyRelationRequest;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
+import com.springrest.springrestproject.dto.response.data.QueryResponse;
+import com.springrest.springrestproject.model.column.ColumnContext;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
+import com.springrest.springrestproject.model.column.ValidRegexPatterns;
 import com.springrest.springrestproject.model.relation.DeletePolicy;
+import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -19,20 +25,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import com.springrest.springrestproject.dto.request.query.QueryRequest;
-import com.springrest.springrestproject.dto.response.data.QueryResponse;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
-public class TableRelationshipIntegrationTest {
+public class TableRelationshipIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private IDataService dataService;
@@ -53,9 +57,22 @@ public class TableRelationshipIntegrationTest {
     private final String childTable = "t_rel_child";
     private final String courseTable = "course";
     private final String studentTable = "student";
+    private final String regexTable = "t_regex_test";
+
+    @Autowired
+    private com.springrest.springrestproject.service.implementations.redis.TableMetadataCacheService tableMetadataCacheService;
+
+    @Autowired
+    private com.springrest.springrestproject.service.implementations.redis.RelationCacheService relationCacheService;
+
+    @Autowired
+    private org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate;
 
     @BeforeEach
     void setUp() {
+        if (redisTemplate.getConnectionFactory() != null) {
+            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        }
         cleanup();
     }
 
@@ -64,27 +81,42 @@ public class TableRelationshipIntegrationTest {
         cleanup();
     }
 
+    @SuppressWarnings("SqlDialectInspection")
     private void cleanup() {
         try { jdbcTemplate.execute("DROP TABLE IF EXISTS " + childTable + " CASCADE;"); } catch (Exception ignored) {}
         try { jdbcTemplate.execute("DROP TABLE IF EXISTS " + parentTable + " CASCADE;"); } catch (Exception ignored) {}
         try { jdbcTemplate.execute("DROP TABLE IF EXISTS course_student CASCADE;"); } catch (Exception ignored) {}
         try { jdbcTemplate.execute("DROP TABLE IF EXISTS " + courseTable + " CASCADE;"); } catch (Exception ignored) {}
         try { jdbcTemplate.execute("DROP TABLE IF EXISTS " + studentTable + " CASCADE;"); } catch (Exception ignored) {}
+        try { jdbcTemplate.execute("DROP TABLE IF EXISTS " + regexTable + " CASCADE;"); } catch (Exception ignored) {}
 
-        tableMetadataRepo.findByTableName(childTable).ifPresent(metadata -> tableMetadataRepo.delete(metadata));
-        tableMetadataRepo.findByTableName(parentTable).ifPresent(metadata -> tableMetadataRepo.delete(metadata));
-        tableMetadataRepo.findByTableName("course_student").ifPresent(metadata -> tableMetadataRepo.delete(metadata));
-        tableMetadataRepo.findByTableName(courseTable).ifPresent(metadata -> tableMetadataRepo.delete(metadata));
-        tableMetadataRepo.findByTableName(studentTable).ifPresent(metadata -> tableMetadataRepo.delete(metadata));
+        try { jdbcTemplate.execute("TRUNCATE TABLE relation_metadata CASCADE;"); } catch (Exception ignored) {}
+        try { jdbcTemplate.execute("TRUNCATE TABLE column_metadata CASCADE;"); } catch (Exception ignored) {}
+        try { jdbcTemplate.execute("TRUNCATE TABLE table_metadata CASCADE;"); } catch (Exception ignored) {}
+
+        tableMetadataCacheService.evict(childTable);
+        tableMetadataCacheService.evict(parentTable);
+        tableMetadataCacheService.evict(courseTable);
+        tableMetadataCacheService.evict(studentTable);
+        tableMetadataCacheService.evict(regexTable);
+        tableMetadataCacheService.evict("course_student");
+
+        relationCacheService.evict(childTable);
+        relationCacheService.evict(parentTable);
+        relationCacheService.evict(courseTable);
+        relationCacheService.evict(studentTable);
+        relationCacheService.evict(regexTable);
+        relationCacheService.evict("course_student");
     }
 
     @Test
     void shouldCreateOneToOneRelationshipAndHandleForeignKeyErrors() {
         // 1. Create Parent Table
         List<ColumnMetadata> parentCols = new ArrayList<>();
-        ColumnMetadata nameCol = new ColumnMetadata();
-        nameCol.setColumnName("name");
-        nameCol.setDataType("VARCHAR(255)");
+        ColumnMetadata nameCol = ColumnMetadata.builder()
+                .columnName("name")
+                .dataType("VARCHAR(255)")
+                .build();
         parentCols.add(nameCol);
         metadataService.createTable(parentTable, new TableCreateRequest(parentCols, false), 0L);
 
@@ -92,7 +124,16 @@ public class TableRelationshipIntegrationTest {
         metadataService.createTable(childTable, new TableCreateRequest(new ArrayList<>(), false), 0L);
         
         // 3. Add ONE_TO_ONE relation dynamically
-        relationService.createOneToOneRelation(new DirectRelationRequest(childTable, "parent_id", parentTable, "id", DeletePolicy.CASCADE), 0L);
+        relationService.createOneToOneRelation(new DirectRelationRequest(childTable, "parent_id", parentTable, "id", DeletePolicy.CASCADE), 123L);
+
+        TableMetadata childMeta = tableMetadataRepo.findByTableName(childTable).orElseThrow();
+        ColumnMetadata parentIdCol = childMeta.columns().stream()
+                .filter(c -> "parent_id".equals(c.columnName()))
+                .findFirst()
+                .orElseThrow();
+        assertNotNull(parentIdCol.columnContext());
+        assertEquals(123L, parentIdCol.columnContext().creatorId());
+        assertEquals(123L, parentIdCol.columnContext().lastUpdaterId());
 
         // 4. Insert into Parent
         var insertParentRes = dataService.insertRow(new TableInsertRequest(parentTable, Map.of("name", "Parent 1")), 0L);
@@ -144,9 +185,10 @@ public class TableRelationshipIntegrationTest {
     @Test
     void shouldApplySetNullDeletePolicy() {
         List<ColumnMetadata> parentCols = new ArrayList<>();
-        ColumnMetadata nameCol = new ColumnMetadata();
-        nameCol.setColumnName("name");
-        nameCol.setDataType("VARCHAR(255)");
+        ColumnMetadata nameCol = ColumnMetadata.builder()
+                .columnName("name")
+                .dataType("VARCHAR(255)")
+                .build();
         parentCols.add(nameCol);
         
         metadataService.createTable(parentTable, new TableCreateRequest(parentCols, false), 0L);
@@ -169,9 +211,10 @@ public class TableRelationshipIntegrationTest {
     @Test
     void shouldCreateManyToManyRelationshipAndInsertData() {
         List<ColumnMetadata> cols = new ArrayList<>();
-        ColumnMetadata nameCol = new ColumnMetadata();
-        nameCol.setColumnName("name");
-        nameCol.setDataType("VARCHAR(255)");
+        ColumnMetadata nameCol = ColumnMetadata.builder()
+                .columnName("name")
+                .dataType("VARCHAR(255)")
+                .build();
         cols.add(nameCol);
         
         metadataService.createTable(courseTable, new TableCreateRequest(cols, false), 0L);
@@ -214,33 +257,37 @@ public class TableRelationshipIntegrationTest {
     void shouldSuccessfullyJoinRelationsForO2O_O2M_M2M() {
         // --- 1. SETUP TABLES & DIRECT RELATION (O2O/O2M/M2O) ---
         List<ColumnMetadata> parentCols = new ArrayList<>();
-        ColumnMetadata parentName = new ColumnMetadata();
-        parentName.setColumnName("name");
-        parentName.setDataType("VARCHAR(255)");
+        ColumnMetadata parentName = ColumnMetadata.builder()
+                .columnName("name")
+                .dataType("VARCHAR(255)")
+                .build();
         parentCols.add(parentName);
         metadataService.createTable(parentTable, new TableCreateRequest(parentCols, false), 0L);
-
+ 
         List<ColumnMetadata> childCols = new ArrayList<>();
-        ColumnMetadata childName = new ColumnMetadata();
-        childName.setColumnName("val");
-        childName.setDataType("VARCHAR(255)");
+        ColumnMetadata childName = ColumnMetadata.builder()
+                .columnName("val")
+                .dataType("VARCHAR(255)")
+                .build();
         childCols.add(childName);
         metadataService.createTable(childTable, new TableCreateRequest(childCols, false), 0L);
         
         relationService.createManyToOneRelation(new DirectRelationRequest(childTable, "parent_id", parentTable, "id", DeletePolicy.CASCADE), 0L);
-
+ 
         // --- 2. SETUP M2M RELATION ---
         List<ColumnMetadata> courseCols = new ArrayList<>();
-        ColumnMetadata courseName = new ColumnMetadata();
-        courseName.setColumnName("name");
-        courseName.setDataType("VARCHAR(255)");
+        ColumnMetadata courseName = ColumnMetadata.builder()
+                .columnName("name")
+                .dataType("VARCHAR(255)")
+                .build();
         courseCols.add(courseName);
         metadataService.createTable(courseTable, new TableCreateRequest(courseCols, false), 0L);
-
+ 
         List<ColumnMetadata> studentCols = new ArrayList<>();
-        ColumnMetadata studentName = new ColumnMetadata();
-        studentName.setColumnName("name");
-        studentName.setDataType("VARCHAR(255)");
+        ColumnMetadata studentName = ColumnMetadata.builder()
+                .columnName("name")
+                .dataType("VARCHAR(255)")
+                .build();
         studentCols.add(studentName);
         metadataService.createTable(studentTable, new TableCreateRequest(studentCols, false), 0L);
 
@@ -339,5 +386,72 @@ public class TableRelationshipIntegrationTest {
         List<?> mathStudents = (List<?>) mathRow.get(studentTable);
         assertNotNull(mathStudents);
         assertEquals(2, mathStudents.size()); // Alice and Bob
+    }
+
+    @Test
+    void shouldValidateRegexPatternsSuccessfullyAndFailOnMismatch() {
+        // Test enum deserialization/creation
+        assertEquals(ValidRegexPatterns.EMAIL, ValidRegexPatterns.fromValue("email"));
+        assertEquals(ValidRegexPatterns.EMAIL, ValidRegexPatterns.fromValue("EMAIL"));
+        assertEquals(ValidRegexPatterns.PHONE, ValidRegexPatterns.fromValue("phone"));
+        assertEquals(ValidRegexPatterns.PHONE, ValidRegexPatterns.fromValue("PHONE"));
+
+        ApplicationException creationEx = assertThrows(ApplicationException.class, () ->
+            ValidRegexPatterns.fromValue("invalid_pattern")
+        );
+        assertEquals(ErrorCode.INVALID_REGEX_PATTERN_CREATION, creationEx.getErrorCode());
+        assertTrue(creationEx.getArgs()[1].toString().contains("EMAIL"));
+        assertTrue(creationEx.getArgs()[1].toString().contains("PHONE"));
+
+        // 1. Create a table with an email column and a phone column
+        List<ColumnMetadata> cols = new ArrayList<>();
+        
+        ColumnContext emailCtx = ColumnContext.builder()
+                .validationRegex(ValidRegexPatterns.EMAIL)
+                .build();
+        ColumnMetadata emailCol = ColumnMetadata.builder()
+                .columnName("email")
+                .dataType("VARCHAR(255)")
+                .columnContext(emailCtx)
+                .build();
+        cols.add(emailCol);
+ 
+        ColumnContext phoneCtx = ColumnContext.builder()
+                .validationRegex(ValidRegexPatterns.PHONE)
+                .build();
+        ColumnMetadata phoneCol = ColumnMetadata.builder()
+                .columnName("phone")
+                .dataType("VARCHAR(20)")
+                .columnContext(phoneCtx)
+                .build();
+        cols.add(phoneCol);
+ 
+        metadataService.createTable(regexTable, new TableCreateRequest(cols, false), 0L);
+
+        // 2. Inserting a row with valid email and phone format should succeed
+        assertDoesNotThrow(() ->
+            dataService.insertRow(new TableInsertRequest(regexTable, Map.of(
+                "email", "john.doe@example.com",
+                "phone", "+905551234567"
+            )), 0L)
+        );
+
+        // 3. Inserting a row with an invalid email format should throw ApplicationException with INVALID_REGEX_PATTERN
+        ApplicationException exEmail = assertThrows(ApplicationException.class, () ->
+            dataService.insertRow(new TableInsertRequest(regexTable, Map.of(
+                "email", "invalid-email-address",
+                "phone", "+123456"
+            )), 0L)
+        );
+        assertEquals(ErrorCode.INVALID_REGEX_PATTERN, exEmail.getErrorCode());
+
+        // 4. Inserting a row with an invalid phone format should throw ApplicationException with INVALID_REGEX_PATTERN
+        ApplicationException exPhone = assertThrows(ApplicationException.class, () ->
+            dataService.insertRow(new TableInsertRequest(regexTable, Map.of(
+                "email", "valid@email.com",
+                "phone", "123-abc-456"
+            )), 0L)
+        );
+        assertEquals(ErrorCode.INVALID_REGEX_PATTERN, exPhone.getErrorCode());
     }
 }

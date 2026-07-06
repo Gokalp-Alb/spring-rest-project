@@ -52,11 +52,7 @@ CREATE TABLE column_metadata (
                                  last_changed_date TIMESTAMP,
                                  is_sensitive BOOLEAN DEFAULT FALSE,
                                  is_unique BOOLEAN DEFAULT FALSE,
-                                 validation_regex VARCHAR(500),
-                                 relation_type VARCHAR(50),
-                                 related_table VARCHAR(255),
-                                 related_column VARCHAR(255),
-                                 delete_policy VARCHAR(50)
+                                 validation_regex VARCHAR(500)
 );
 
 
@@ -119,10 +115,6 @@ CREATE TABLE column_metadata_log (
     is_sensitive BOOLEAN,
     is_unique BOOLEAN,
     validation_regex VARCHAR(500),
-    relation_type VARCHAR(50),
-    related_table VARCHAR(255),
-    related_column VARCHAR(255),
-    delete_policy VARCHAR(50),
     operation_type VARCHAR(50),
     executed_at TIMESTAMP,
     user_id BIGINT
@@ -135,6 +127,42 @@ CREATE TABLE kafka_table_mappings_log (
     direction VARCHAR(50),
     kafka_topic VARCHAR(255),
     table_name VARCHAR(255),
+    operation_type VARCHAR(50),
+    executed_at TIMESTAMP,
+    user_id BIGINT
+);
+
+CREATE TABLE relation_metadata (
+    id BIGSERIAL PRIMARY KEY,
+    relation_type VARCHAR(50) NOT NULL,
+    source_table VARCHAR(255) NOT NULL,
+    source_column VARCHAR(255),
+    target_table VARCHAR(255) NOT NULL,
+    target_column VARCHAR(255),
+    junction_table VARCHAR(255),
+    source_delete_policy VARCHAR(50),
+    target_delete_policy VARCHAR(50),
+    creator_id BIGINT,
+    created_date TIMESTAMP,
+    last_updater_id BIGINT,
+    last_changed_date TIMESTAMP
+);
+
+CREATE TABLE relation_metadata_log (
+    log_id BIGSERIAL PRIMARY KEY,
+    id BIGINT,
+    relation_type VARCHAR(50),
+    source_table VARCHAR(255),
+    source_column VARCHAR(255),
+    target_table VARCHAR(255),
+    target_column VARCHAR(255),
+    junction_table VARCHAR(255),
+    source_delete_policy VARCHAR(50),
+    target_delete_policy VARCHAR(50),
+    creator_id BIGINT,
+    created_date TIMESTAMP,
+    last_updater_id BIGINT,
+    last_changed_date TIMESTAMP,
     operation_type VARCHAR(50),
     executed_at TIMESTAMP,
     user_id BIGINT

@@ -1,6 +1,6 @@
 package com.springrest.springrestproject.service.implementations.redis;
 
-import com.springrest.springrestproject.model.column.ColumnMetadata;
+import com.springrest.springrestproject.model.relation.RelationMetadata;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -17,19 +17,20 @@ import java.util.Optional;
 public class RelationCacheService {
     private final RedisTemplate<String, Object> redisTemplate;
 
-    public Optional<List<ColumnMetadata>> get(String tableName) {
+    @SuppressWarnings("unchecked")
+    public Optional<List<RelationMetadata>> get(String tableName) {
         try {
-            Object cached = redisTemplate.opsForValue().get("incoming-fks:" + tableName);
-            return Optional.ofNullable((List<ColumnMetadata>) cached);
+            Object cached = redisTemplate.opsForValue().get("relations:" + tableName);
+            return Optional.ofNullable((List<RelationMetadata>) cached);
         } catch (RedisConnectionFailureException e) {
             log.warn("Redis unavailable, skipping cache lookup for {}", tableName);
             return Optional.empty();
         }
     }
 
-    public void put(String tableName, List<ColumnMetadata> columns) {
+    public void put(String tableName, List<RelationMetadata> relations) {
         try {
-            redisTemplate.opsForValue().set("incoming-fks:" + tableName, columns, Duration.ofMinutes(10));
+            redisTemplate.opsForValue().set("relations:" + tableName, relations, Duration.ofMinutes(10));
         } catch (RedisConnectionFailureException e) {
             log.warn("Redis unavailable, skipping cache write for {}", tableName);
         }
@@ -37,7 +38,7 @@ public class RelationCacheService {
 
     public void evict(String tableName) {
         try {
-            redisTemplate.delete("incoming-fks:" + tableName);
+            redisTemplate.delete("relations:" + tableName);
         } catch (RedisConnectionFailureException e) {
             log.warn("Redis unavailable, skipping cache eviction for {}", tableName);
         }

@@ -60,28 +60,35 @@ public class AppUserRepo {
     }
 
     public AppUser save(AppUser user) {
-        if (user.getId() == null) {
+        if (user.id() == null) {
             Long generatedId = Objects.requireNonNull(dsl.insertInto(APP_USERS)
-                            .set(APP_USERS.USERNAME, user.getUsername())
-                            .set(APP_USERS.PASSWORD, user.getPassword())
-                            .set(APP_USERS.ROLE, user.getRole() != null ? user.getRole().name() : null)
-                            .set(APP_USERS.ACTIVE, user.getActive())
+                            .set(APP_USERS.USERNAME, user.username())
+                            .set(APP_USERS.PASSWORD, user.password())
+                            .set(APP_USERS.ROLE, user.role() != null ? user.role().name() : null)
+                            .set(APP_USERS.ACTIVE, user.active())
                             .returning(APP_USERS.ID)
                             .fetchOne())
                     .getValue(APP_USERS.ID);
-            user.setId(generatedId);
-            logAppUserMutation(user, "POST");
+            AppUser savedUser = AppUser.builder()
+                    .id(generatedId)
+                    .username(user.username())
+                    .password(user.password())
+                    .role(user.role())
+                    .active(user.active())
+                    .build();
+            logAppUserMutation(savedUser, "POST");
+            return savedUser;
         } else {
             dsl.update(APP_USERS)
-                    .set(APP_USERS.USERNAME, user.getUsername())
-                    .set(APP_USERS.PASSWORD, user.getPassword())
-                    .set(APP_USERS.ROLE, user.getRole() != null ? user.getRole().name() : null)
-                    .set(APP_USERS.ACTIVE, user.getActive())
-                    .where(APP_USERS.ID.eq(user.getId()))
+                    .set(APP_USERS.USERNAME, user.username())
+                    .set(APP_USERS.PASSWORD, user.password())
+                    .set(APP_USERS.ROLE, user.role() != null ? user.role().name() : null)
+                    .set(APP_USERS.ACTIVE, user.active())
+                    .where(APP_USERS.ID.eq(user.id()))
                     .execute();
             logAppUserMutation(user, "PUT");
+            return user;
         }
-        return user;
     }
 
     private void logAppUserMutation(AppUser user, String operation) {
@@ -90,11 +97,11 @@ public class AppUserRepo {
             executorId = 0L;
         }
         dsl.insertInto(APP_USERS_LOG)
-                .set(APP_USERS_LOG.ID, user.getId())
-                .set(APP_USERS_LOG.ACTIVE, user.getActive())
-                .set(APP_USERS_LOG.PASSWORD, user.getPassword())
-                .set(APP_USERS_LOG.ROLE, user.getRole() != null ? user.getRole().name() : null)
-                .set(APP_USERS_LOG.USERNAME, user.getUsername())
+                .set(APP_USERS_LOG.ID, user.id())
+                .set(APP_USERS_LOG.ACTIVE, user.active())
+                .set(APP_USERS_LOG.PASSWORD, user.password())
+                .set(APP_USERS_LOG.ROLE, user.role() != null ? user.role().name() : null)
+                .set(APP_USERS_LOG.USERNAME, user.username())
                 .set(APP_USERS_LOG.OPERATION_TYPE, operation)
                 .set(APP_USERS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
                 .set(APP_USERS_LOG.USER_ID, executorId)

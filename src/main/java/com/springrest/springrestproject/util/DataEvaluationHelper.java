@@ -27,15 +27,15 @@ public class DataEvaluationHelper {
         if (showSensitive == null) { showSensitive = false; }
         columnProjections.add("id");
 
-        for (ColumnMetadata col : metadata.getColumns()) {
-            if (col.getColumnName().equalsIgnoreCase("id")) {
+        for (ColumnMetadata col : metadata.columns()) {
+            if (col.columnName().equalsIgnoreCase("id")) {
                 continue;
             }
-            boolean shouldRedact = !showSensitive && col.getColumnContext().getIsSensitive();
+            boolean shouldRedact = !showSensitive && col.columnContext() != null && Boolean.TRUE.equals(col.columnContext().isSensitive());
             if (shouldRedact) {
-                columnProjections.add("'********' AS " + col.getColumnName());
+                columnProjections.add("'********' AS " + col.columnName());
             } else {
-                columnProjections.add(col.getColumnName());
+                columnProjections.add(col.columnName());
             }
         }
         return String.join(", ", columnProjections);
@@ -63,13 +63,13 @@ public class DataEvaluationHelper {
     }
 
     public void validateRowRegex(TableMetadata metadata, Map<String, Object> rowData) {
-        for (ColumnMetadata col : metadata.getColumns()) {
-            String columnName = col.getColumnName();
+        for (ColumnMetadata col : metadata.columns()) {
+            String columnName = col.columnName();
             if (rowData.containsKey(columnName) && rowData.get(columnName) != null) {
                 String valueStr = String.valueOf(rowData.get(columnName));
 
-                if (col.getColumnContext() != null && col.getColumnContext().getValidationRegex() != null) {
-                    String regex = col.getColumnContext().getValidationRegex();
+                if (col.columnContext() != null && col.columnContext().validationRegex() != null) {
+                    String regex = col.columnContext().validationRegex().getPattern();
                     Pattern pattern = Pattern.compile(regex);
                     Matcher matcher = pattern.matcher(valueStr);
 
@@ -108,11 +108,11 @@ public class DataEvaluationHelper {
     }
 
     public void validateRowDates(TableMetadata metadata, Map<String, Object> rowData) {
-        for (ColumnMetadata col : metadata.getColumns()) {
-            String columnName = col.getColumnName();
+        for (ColumnMetadata col : metadata.columns()) {
+            String columnName = col.columnName();
             if (rowData.containsKey(columnName) && rowData.get(columnName) != null) {
                 String valueStr = String.valueOf(rowData.get(columnName));
-                String dataType = col.getDataType().toUpperCase();
+                String dataType = col.dataType().toUpperCase();
 
                 if (dataType.contains("DATE") || dataType.contains("TIMESTAMP")) {
                     boolean valid = false;

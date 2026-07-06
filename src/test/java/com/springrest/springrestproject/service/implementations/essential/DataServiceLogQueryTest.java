@@ -26,8 +26,10 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.springrest.springrestproject.BaseIntegrationTest;
+
 @SpringBootTest
-public class DataServiceLogQueryTest {
+public class DataServiceLogQueryTest extends BaseIntegrationTest {
     @Autowired
     private IDataService dataService;
 
@@ -43,8 +45,14 @@ public class DataServiceLogQueryTest {
     private final String testTableName = "test_log_query";
     private final String testLogTableName = "test_log_query_log";
 
+    @Autowired
+    private org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate;
+
     @BeforeEach
     void setUp() {
+        if (redisTemplate.getConnectionFactory() != null) {
+            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        }
         cleanup();
     }
 
@@ -73,9 +81,10 @@ public class DataServiceLogQueryTest {
     void shouldQueryLogTableSuccessfullyWhenLogExists() {
         // Create table with audit log
         List<ColumnMetadata> columns = new ArrayList<>();
-        ColumnMetadata col = new ColumnMetadata();
-        col.setColumnName("val");
-        col.setDataType("VARCHAR(255)");
+        ColumnMetadata col = ColumnMetadata.builder()
+                .columnName("val")
+                .dataType("VARCHAR(255)")
+                .build();
         columns.add(col);
 
         TableCreateRequest createRequest = new TableCreateRequest(columns, true);
@@ -146,9 +155,10 @@ public class DataServiceLogQueryTest {
     void shouldNotReturnDeletedRowsWhenQueryingLogs() {
         // Create table with audit log
         List<ColumnMetadata> columns = new ArrayList<>();
-        ColumnMetadata col = new ColumnMetadata();
-        col.setColumnName("val");
-        col.setDataType("VARCHAR(255)");
+        ColumnMetadata col = ColumnMetadata.builder()
+                .columnName("val")
+                .dataType("VARCHAR(255)")
+                .build();
         columns.add(col);
 
         TableCreateRequest createRequest = new TableCreateRequest(columns, true);
@@ -190,9 +200,10 @@ public class DataServiceLogQueryTest {
     void shouldOnlyReturnLogsFromCurrentLifecycleOnRecreatedTable() throws Exception {
         // Create table with audit log
         List<ColumnMetadata> columns = new ArrayList<>();
-        ColumnMetadata col = new ColumnMetadata();
-        col.setColumnName("val");
-        col.setDataType("VARCHAR(255)");
+        ColumnMetadata col = ColumnMetadata.builder()
+                .columnName("val")
+                .dataType("VARCHAR(255)")
+                .build();
         columns.add(col);
 
         TableCreateRequest createRequest = new TableCreateRequest(columns, true);
@@ -220,7 +231,7 @@ public class DataServiceLogQueryTest {
         // Get 2nd table's creation time
         TableMetadata metadata =
                 tableMetadataRepo.findByTableName(testTableName).orElseThrow();
-        java.time.LocalDateTime tCreate2 = metadata.getTableContext().getCreatedDate();
+        java.time.LocalDateTime tCreate2 = metadata.tableContext().createdDate();
         java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         String tCreate2Str = tCreate2.format(formatter);
 
@@ -273,9 +284,10 @@ public class DataServiceLogQueryTest {
     void shouldThrowInvalidDateFormatWhenInsertingRowWithMalformedDate() {
         // Create table with DATE column
         List<ColumnMetadata> columns = new ArrayList<>();
-        ColumnMetadata col = new ColumnMetadata();
-        col.setColumnName("birth_date");
-        col.setDataType("DATE");
+        ColumnMetadata col = ColumnMetadata.builder()
+                .columnName("birth_date")
+                .dataType("DATE")
+                .build();
         columns.add(col);
 
         TableCreateRequest createRequest = new TableCreateRequest(columns, false);
@@ -304,9 +316,10 @@ public class DataServiceLogQueryTest {
     void shouldQueryAuditLogWithVariousOperationTypes() {
         // Create table with audit log
         List<ColumnMetadata> columns = new ArrayList<>();
-        ColumnMetadata col = new ColumnMetadata();
-        col.setColumnName("val");
-        col.setDataType("VARCHAR(255)");
+        ColumnMetadata col = ColumnMetadata.builder()
+                .columnName("val")
+                .dataType("VARCHAR(255)")
+                .build();
         columns.add(col);
 
         TableCreateRequest createRequest = new TableCreateRequest(columns, true);

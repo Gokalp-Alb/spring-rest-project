@@ -7,6 +7,7 @@ import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.relation.DeletePolicy;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
+import com.springrest.springrestproject.repository.RelationMetadataRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import org.junit.jupiter.api.AfterEach;
@@ -22,8 +23,10 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.springrest.springrestproject.BaseIntegrationTest;
+
 @SpringBootTest
-public class SchemaCacheIntegrationTest {
+public class SchemaCacheIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private IMetadataService metadataService;
@@ -35,6 +38,9 @@ public class SchemaCacheIntegrationTest {
     private TableMetadataRepo tableMetadataRepo;
 
     @Autowired
+    private RelationMetadataRepo relationMetadataRepo;
+
+    @Autowired
     private TableMetadataCacheService tableMetadataCacheService;
 
     @Autowired
@@ -44,8 +50,14 @@ public class SchemaCacheIntegrationTest {
     private final String tableName2 = "cache_test_table_2";
     private final String tableName3 = "cache_test_table_3";
 
+    @Autowired
+    private org.springframework.data.redis.core.RedisTemplate<String, Object> redisTemplate;
+
     @BeforeEach
     void setUp() {
+        if (redisTemplate.getConnectionFactory() != null) {
+            redisTemplate.getConnectionFactory().getConnection().serverCommands().flushAll();
+        }
         cleanup();
     }
 
@@ -70,9 +82,10 @@ public class SchemaCacheIntegrationTest {
 
     private void createTable(String name) {
         List<ColumnMetadata> columns = new ArrayList<>();
-        ColumnMetadata col1 = new ColumnMetadata();
-        col1.setColumnName("dummy_col");
-        col1.setDataType("varchar(255)");
+        ColumnMetadata col1 = ColumnMetadata.builder()
+                .columnName("dummy_col")
+                .dataType("varchar(255)")
+                .build();
         columns.add(col1);
         
         TableCreateRequest request = new TableCreateRequest(columns, false);
@@ -87,7 +100,7 @@ public class SchemaCacheIntegrationTest {
         
         Optional<TableMetadata> cached = tableMetadataCacheService.get(tableName1);
         assertTrue(cached.isPresent(), "Table should be cached after findByTableName is called.");
-        assertEquals(tableName1, cached.get().getTableName());
+        assertEquals(tableName1, cached.get().tableName());
 
         metadataService.deleteTableByName(tableName1, 1L);
         
@@ -128,7 +141,7 @@ public class SchemaCacheIntegrationTest {
         );
         relationService.createManyToOneRelation(relReq, 1L);
         
-        tableMetadataRepo.getIncomingFKs(tableName2);
+        relationMetadataRepo.findIncomingFKs(tableName2);
         assertTrue(relationCacheService.get(tableName2).isPresent());
         
         metadataService.deleteTableByName(tableName1, 1L);
@@ -142,8 +155,8 @@ public class SchemaCacheIntegrationTest {
         createTable(tableName2);
 
         // Populate relation cache
-        tableMetadataRepo.getIncomingFKs(tableName1);
-        tableMetadataRepo.getIncomingFKs(tableName2);
+        relationMetadataRepo.findIncomingFKs(tableName1);
+        relationMetadataRepo.findIncomingFKs(tableName2);
         assertTrue(relationCacheService.get(tableName1).isPresent());
         assertTrue(relationCacheService.get(tableName2).isPresent());
 
@@ -169,8 +182,8 @@ public class SchemaCacheIntegrationTest {
         relationService.createManyToManyRelation(m2mReq, 1L);
 
         // Populate relation cache
-        tableMetadataRepo.getIncomingFKs(tableName1);
-        tableMetadataRepo.getIncomingFKs(tableName2);
+        relationMetadataRepo.findIncomingFKs(tableName1);
+        relationMetadataRepo.findIncomingFKs(tableName2);
         assertTrue(relationCacheService.get(tableName1).isPresent());
         assertTrue(relationCacheService.get(tableName2).isPresent());
 

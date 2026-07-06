@@ -43,11 +43,17 @@ public class KafkaMappingController {
     @ResponseStatus(HttpStatus.OK)
     public ApiResponse<Void> removeMapping(@PathVariable Long id) {
         mappingRepo.findById(id).ifPresent(mapping -> {
-            mapping.setActive(false);
-            mappingRepo.save(mapping);
+            KafkaTableMapping updatedMapping = KafkaTableMapping.builder()
+                    .id(mapping.id())
+                    .tableName(mapping.tableName())
+                    .kafkaTopic(mapping.kafkaTopic())
+                    .direction(mapping.direction())
+                    .active(false)
+                    .build();
+            mappingRepo.save(updatedMapping);
 
-            if ("INBOUND".equalsIgnoreCase(mapping.getDirection())) {
-                consumerManager.unsubscribeFromInboundTopic(mapping.getKafkaTopic());
+            if ("INBOUND".equalsIgnoreCase(mapping.direction())) {
+                consumerManager.unsubscribeFromInboundTopic(mapping.kafkaTopic());
             }
         });
 

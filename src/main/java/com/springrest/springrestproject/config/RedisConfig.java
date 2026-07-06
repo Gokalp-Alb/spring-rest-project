@@ -15,11 +15,25 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import tools.jackson.databind.jsontype.PolymorphicTypeValidator;
+import tools.jackson.databind.jsontype.impl.DefaultTypeResolverBuilder;
+import tools.jackson.databind.JavaType;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import java.time.Duration;
 
 @Configuration
 public class RedisConfig {
+
+    public static class RecordSupportingTypeResolver extends DefaultTypeResolverBuilder {
+        public RecordSupportingTypeResolver(PolymorphicTypeValidator ptv, DefaultTyping t) {
+            super(ptv, t, JsonTypeInfo.As.PROPERTY, JsonTypeInfo.Id.CLASS, null);
+        }
+
+        @Override
+        public boolean useForType(JavaType t) {
+            return t.getRawClass().isRecord() || super.useForType(t);
+        }
+    }
 
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
@@ -55,9 +69,14 @@ public class RedisConfig {
                 .allowIfBaseType(Object.class)
                 .build();
 
+        RecordSupportingTypeResolver typeResolver = new RecordSupportingTypeResolver(
+                typeValidator,
+                DefaultTyping.NON_FINAL
+        );
+
         return JsonMapper.builder()
                 .findAndAddModules()
-                .activateDefaultTyping(typeValidator, DefaultTyping.NON_FINAL)
+                .setDefaultTyping(typeResolver)
                 .build();
     }
 }

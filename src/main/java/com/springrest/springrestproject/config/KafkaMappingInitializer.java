@@ -20,10 +20,10 @@ public class KafkaMappingInitializer implements CommandLineRunner {
     public void run(String @NonNull ... args) {
         mappingRepo.findByDirectionAndActiveTrue("INBOUND").forEach(mapping -> {
             try {
-                consumerManager.subscribeToInboundTopic(mapping.getKafkaTopic(), mapping.getTableName());
-                log.info("Successfully bound inbound topic [{}] to table [{}]", mapping.getKafkaTopic(), mapping.getTableName());
+                consumerManager.subscribeToInboundTopic(mapping.kafkaTopic(), mapping.tableName());
+                log.info("Successfully bound inbound topic [{}] to table [{}]", mapping.kafkaTopic(), mapping.tableName());
             } catch (Exception e) {
-                log.error("Failed to start listener for topic: {}", mapping.getKafkaTopic(), e);
+                log.error("Failed to start listener for topic: {}", mapping.kafkaTopic(), e);
             }
         });
     }
