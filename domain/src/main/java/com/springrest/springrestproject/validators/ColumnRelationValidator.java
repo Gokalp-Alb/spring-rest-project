@@ -29,7 +29,10 @@ public class ColumnRelationValidator {
 
     private void validateRelation(RelationMetadata relation) {
         if (relation.targetTable() == null || relation.targetTable().isBlank()) {
-            throw new ApplicationException(ErrorCode.BAD_REQUEST);
+            throw new ApplicationException(
+                    ErrorCode.BLANK_TARGET_TABLE,
+                    List.of(new FieldValidationError("targetTable", "Target table name cannot be empty"))
+            );
         }
 
         TableMetadata relatedTable = resolveRelatedTable(relation);
@@ -41,9 +44,9 @@ public class ColumnRelationValidator {
                 .orElseThrow(() -> {
                     String reason = String.format("referenced table does not exist: %s", relation.targetTable());
                     return new ApplicationException(
-                            ErrorCode.RESOURCE_NOT_FOUND,
+                            ErrorCode.TABLE_NOT_FOUND,
                             List.of(new FieldValidationError(relation.sourceColumn(), reason)),
-                            reason
+                            relation.targetTable()
                     );
                 });
     }

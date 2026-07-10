@@ -335,7 +335,7 @@ public class TableRelationshipIntegrationTest extends BaseIntegrationTest {
         assertNotNull(childrenOfA);
         assertEquals(2, childrenOfA.size()); // Should have Child 1 and Child 2
 
-        // 4.2. Forward M2O Join: Query children, join parent (relation name "t_rel_parent" or "t_rel_parent_via_parent_id")
+        // 4.2. Forward M2O Join: Query children, join parent (relation name "t_rel_parent")
         QueryRequest queryChildren = new QueryRequest(
                 childTable,
                 List.of("id", "val", parentTable + "_id"),
@@ -343,8 +343,7 @@ public class TableRelationshipIntegrationTest extends BaseIntegrationTest {
                 List.of(),
                 List.of(),
                 Map.of(
-                    parentTable, new QueryRequest(parentTable, null, null, null, null, null),
-                    parentTable + "_via_" + parentTable + "_id", new QueryRequest(parentTable, null, null, null, null, null)
+                    parentTable, new QueryRequest(parentTable, null, null, null, null, null)
                 )
         );
         QueryResponse resChildren = dataService.executeSelect(queryChildren, 0L, pageable);
@@ -360,12 +359,6 @@ public class TableRelationshipIntegrationTest extends BaseIntegrationTest {
         assertNotNull(parentSimple);
         assertEquals(1, parentSimple.size());
         assertEquals("Parent A", ((Map<?, ?>) parentSimple.getFirst()).get("name"));
-
-        // Verify explicit via join
-        List<?> parentVia = (List<?>) child1Row.get(parentTable + "_via_" + parentTable + "_id");
-        assertNotNull(parentVia);
-        assertEquals(1, parentVia.size());
-        assertEquals("Parent A", ((Map<?, ?>) parentVia.getFirst()).get("name"));
 
         // 4.3. M2M Join: Query courses, join students (relation name "student")
         QueryRequest queryCourses = new QueryRequest(

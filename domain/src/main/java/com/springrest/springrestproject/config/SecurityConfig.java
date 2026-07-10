@@ -48,11 +48,11 @@ public class SecurityConfig {
                 )
                 .exceptionHandling(exception -> exception
                         .accessDeniedHandler((request, response, accessDeniedException) -> {
-                            ApplicationException customEx = new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+                            ApplicationException customEx = new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Access denied: insufficient privileges.");
                             resolver.resolveException(request, response, null, customEx);
                         })
                         .authenticationEntryPoint((request, response, authException) -> {
-                            ApplicationException customEx = new ApplicationException(ErrorCode.BAD_REQUEST);
+                            ApplicationException customEx = new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Authentication failed: missing, expired, or invalid credentials.");
                             resolver.resolveException(request, response, null, customEx);
                         })
                 )

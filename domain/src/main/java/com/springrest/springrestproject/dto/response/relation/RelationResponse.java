@@ -12,5 +12,18 @@ public record RelationResponse(
         String targetColumn,
         RelationType relationType,
         DeletePolicy sourceDeletePolicy,
-        DeletePolicy targetDeletePolicy // Optional, used for many-to-many junction tables
-) {}
+        DeletePolicy targetDeletePolicy, // Optional, used for many-to-many junction tables
+        String junctionTableName
+) {
+    public RelationResponse(
+            String sourceTable,
+            String sourceColumn,
+            String targetTable,
+            String targetColumn,
+            RelationType relationType,
+            DeletePolicy sourceDeletePolicy,
+            DeletePolicy targetDeletePolicy
+    ) {
+        this(sourceTable, sourceColumn, targetTable, targetColumn, relationType, sourceDeletePolicy, targetDeletePolicy, null);
+    }
+}

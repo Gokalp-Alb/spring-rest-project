@@ -2,6 +2,8 @@ package com.springrest.springrestproject.service.implementations;
 
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.core.exception.FieldValidationError;
+import java.util.List;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.user.AppUser;
@@ -29,7 +31,11 @@ public class UserService implements IUserService {
     @Transactional
     public UserRequest createUser(AppUser user, Long userId) {
         if (user.role() == null || user.role().equals(Role.MCP_AGENT)) {
-            throw new ApplicationException(ErrorCode.BAD_REQUEST, "Invalid user role");
+            throw new ApplicationException(
+                    ErrorCode.BAD_REQUEST,
+                    List.of(new FieldValidationError("role", "Invalid user role")),
+                    "Invalid user role"
+            );
         }
         AppUser userToSave = AppUser.builder()
                 .username(user.username())
@@ -63,7 +69,7 @@ public class UserService implements IUserService {
     @Transactional(readOnly = true)
     public UserRequest getUserById(Long id) {
         AppUser user = userRepo.findById(id)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + id));
         return new UserRequest(
                 user.id(),
                 user.username(),
@@ -76,7 +82,7 @@ public class UserService implements IUserService {
     @Transactional(readOnly = true)
     public UserRequest getUserByName(String name) {
         AppUser user = userRepo.findByUsername(name)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, name));
         return new UserRequest(
                 user.id(),
                 user.username(),
@@ -89,16 +95,19 @@ public class UserService implements IUserService {
     @Transactional(readOnly = true)
     public AppUser findByUsername(String username) {
         return userRepo.findByUsername(username)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, username));
     }
 
     @Override
     @Transactional
     public void deleteUserById(Long id, Long userId) {
         AppUser user = userRepo.findById(id)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + id));
         if(!Boolean.TRUE.equals(user.active())){
-            throw new ApplicationException(ErrorCode.ALREADY_DELETED);
+            throw new ApplicationException(
+                    ErrorCode.ALREADY_DELETED,
+                    List.of(new FieldValidationError("id", "User is already inactive/deleted"))
+            );
         }
         AppUser updatedUser = AppUser.builder()
                 .id(user.id())

@@ -11,16 +11,17 @@ import com.springrest.springrestproject.model.column.ColumnContext;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.column.SystemColumn;
 import com.springrest.springrestproject.model.relation.DeletePolicy;
+import com.springrest.springrestproject.model.relation.RelationMetadata;
 import com.springrest.springrestproject.model.relation.RelationType;
 import com.springrest.springrestproject.model.table.TableContext;
 import com.springrest.springrestproject.model.table.TableMetadata;
+import com.springrest.springrestproject.repository.RelationMetadataRepo;
 import com.springrest.springrestproject.repository.SystemDdlLogRepo;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
-import com.springrest.springrestproject.model.relation.RelationMetadata;
-import com.springrest.springrestproject.repository.RelationMetadataRepo;
 import com.springrest.springrestproject.service.implementations.redis.RelationCacheService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
+import com.springrest.springrestproject.validators.SqlIdentifierValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -49,15 +50,26 @@ public class MetadataService implements IMetadataService {
     private final TableMapper tableMapper;
     private final RelationCacheService relationCacheService;
     private final IRelationService relationService;
+    private final SqlIdentifierValidator sqlIdentifierValidator;
 
     @Override
     @Transactional
     public TableMetadata createTable(String tableName, TableCreateRequest request, Long userId) {
-        if (tableName.toLowerCase().endsWith("_log") || tableName.toLowerCase().endsWith("_jt")) {
-            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+        sqlIdentifierValidator.validate(tableName);
+        if (tableName.toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
+        }
+        if (tableName.toLowerCase().endsWith("_jt")) {
+            throw new ApplicationException(ErrorCode.JUNCTION_TABLE_MUTATION_DENIED);
         }
 
-        List<ColumnMetadata> augmentedColumns = new ArrayList<>(request.columns());
+        if (request.columns() != null) {
+            for (ColumnMetadata col : request.columns()) {
+                sqlIdentifierValidator.validate(col.columnName());
+            }
+        }
+
+        List<ColumnMetadata> augmentedColumns = request.columns() != null ? new ArrayList<>(request.columns()) : new ArrayList<>();
         augmentedColumns.addAll(createSystemColumns());
         List<String> colDefs = new ArrayList<>();
 
@@ -131,25 +143,29 @@ public class MetadataService implements IMetadataService {
     @Override
     public TableResponse getTableById(Long tableId) {
         TableMetadata metadata = tableMetadataRepo.findById(tableId)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, "ID: " + tableId));
         return tableMapper.toResponse(metadata);
     }
 
     @Override
     public TableResponse getTableByName(String tableId) {
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableId)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableId));
         return tableMapper.toResponse(metadata);
     }
 
     @Override
     @Transactional
     public TableResponse deleteTableByName(String tableName, Long userId) {
-        if (tableName.toLowerCase().endsWith("_log") || tableName.toLowerCase().endsWith("_jt")) {
-            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+        sqlIdentifierValidator.validate(tableName);
+        if (tableName.toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
+        }
+        if (tableName.toLowerCase().endsWith("_jt")) {
+            throw new ApplicationException(ErrorCode.JUNCTION_TABLE_MUTATION_DENIED);
         }
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
 
         List<RelationMetadata> relations = relationMetadataRepo.findByTableName(tableName);
 
@@ -313,7 +329,7 @@ public class MetadataService implements IMetadataService {
         defs.put(tableName, tableSchema);
 
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
 
         tableSchema.put("type", "object");
         tableSchema.put("title", tableName);

@@ -22,6 +22,7 @@ import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.util.DataEvaluationHelper;
+import com.springrest.springrestproject.validators.SqlIdentifierValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -52,21 +53,28 @@ public class DataService implements IDataService {
     private final IRelationService relationService;
     private final DataEvaluationHelper dataHelper;
     private final OutboundKafkaPublisher kafkaPublisher;
+    private final SqlIdentifierValidator sqlIdentifierValidator;
 
     @Override
     @Transactional
     public DataResponse insertRow(TableInsertRequest request, Long userId) {
+        sqlIdentifierValidator.validate(request.tableName());
+        if (request.rowData() != null) {
+            for (String key : request.rowData().keySet()) {
+                if (!"relations".equals(key)) {
+                    sqlIdentifierValidator.validate(key);
+                }
+            }
+        }
         if (request.tableName().toLowerCase().endsWith("_log")) {
-            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
         }
         TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.tableName()));
         dataHelper.validateRowRegex(metadata, request.rowData());
         dataHelper.validateRowDates(metadata, request.rowData());
 
-
-
-        Map<String, Object> finalRowData = new HashMap<>(request.rowData());
+        Map<String, Object> finalRowData = request.rowData() != null ? new HashMap<>(request.rowData()) : new HashMap<>();
         
         @SuppressWarnings("unchecked")
         Map<String, List<Map<String, Object>>> relations = (Map<String, List<Map<String, Object>>>) finalRowData.remove("relations");
@@ -180,12 +188,50 @@ public class DataService implements IDataService {
         );
     }
 
+    private void validateQueryRequest(QueryRequest request) {
+        if (request == null) return;
+        sqlIdentifierValidator.validate(request.tableName());
+        if (request.fields() != null) {
+            for (String field : request.fields()) {
+                sqlIdentifierValidator.validate(field);
+            }
+        }
+        if (request.conditions() != null) {
+            for (QueryRequest.Condition cond : request.conditions()) {
+                sqlIdentifierValidator.validate(cond.column());
+            }
+        }
+        if (request.audit() != null) {
+            for (QueryRequest.Condition cond : request.audit()) {
+                sqlIdentifierValidator.validate(cond.column());
+            }
+        }
+        if (request.sorts() != null) {
+            for (QueryRequest.Sort sort : request.sorts()) {
+                sqlIdentifierValidator.validate(sort.column());
+            }
+        }
+        if (request.relations() != null) {
+            for (Map.Entry<String, QueryRequest> entry : request.relations().entrySet()) {
+                sqlIdentifierValidator.validate(entry.getKey());
+                validateQueryRequest(entry.getValue());
+            }
+        }
+    }
+
     @Override
     public QueryResponse executeSelect(QueryRequest request, Long userId, Pageable pageable) {
+        validateQueryRequest(request);
         if (userId != null && userId != 0L) {
             userRepo.findById(userId)
-                    .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST));
+                    .orElseThrow(() -> new ApplicationException(
+                            ErrorCode.USER_CONTEXT_INVALID,
+                            List.of(new FieldValidationError("userId", "Executing user does not exist")),
+                            userId
+                    ));
         }
+        tableMetadataRepo.findByTableName(request.tableName())
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.tableName()));
         dataHelper.validateQueryDates(request);
 
         List<Map<String, Object>> data = executeMainSelect(request, pageable);
@@ -275,7 +321,12 @@ public class DataService implements IDataService {
             ResolvedRelation match = resolvedRelations.stream()
                     .filter(r -> r.relationName().equalsIgnoreCase(relName))
                     .findFirst()
-                    .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST, "Bogus relation: " + relName));
+                    .orElseThrow(() -> new ApplicationException(
+                            ErrorCode.RELATION_NOT_FOUND,
+                            List.of(new FieldValidationError("relations", "Relation '" + relName + "' does not exist on table '" + tableName + "'")),
+                            relName,
+                            tableName
+                    ));
 
             String currentAlias = "B" + aliasCounter.getAndIncrement();
             if (RelationJoinType.M2M == match.type()) {
@@ -478,8 +529,9 @@ public class DataService implements IDataService {
     @Override
     @Transactional(readOnly = true)
     public Page<Map<String, Object>> getTableData(String tableName, Boolean showSensitive, Pageable pageable, Long userId) {
+        sqlIdentifierValidator.validate(tableName);
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
 
         String projection = dataHelper.getProjectionClause(metadata, showSensitive);
         String countSql = String.format("SELECT COUNT(*) FROM %s", tableName);
@@ -496,11 +548,12 @@ public class DataService implements IDataService {
     @Override
     @Transactional
     public DataResponse deleteRowById(String tableName, Long id, Long userId) {
+        sqlIdentifierValidator.validate(tableName);
         if (tableName.toLowerCase().endsWith("_log")) {
-            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
         }
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
         String deleteSql = String.format("DELETE FROM %s WHERE id = ?;", tableName);
 
         List<Object> logValues = new ArrayList<>();
@@ -519,7 +572,7 @@ public class DataService implements IDataService {
         int rowsAffected = jdbcTemplate.update(deleteSql, id);
         kafkaPublisher.publishMutation(tableName, "DELETE", Map.of("id", id), userId);
         if (rowsAffected == 0) {
-            throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ApplicationException(ErrorCode.ROW_NOT_FOUND, id, tableName);
         }
 
         if (beforeState != null) {
@@ -544,13 +597,22 @@ public class DataService implements IDataService {
     @Override
     @Transactional
     public DataResponse updateRowById(String tableName, Long id, Map<String, Object> updateData, Long userId) {
+        sqlIdentifierValidator.validate(tableName);
+        if (updateData != null) {
+            for (String key : updateData.keySet()) {
+                sqlIdentifierValidator.validate(key);
+            }
+        }
         if (tableName.toLowerCase().endsWith("_log")) {
-            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
         }
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
         if (updateData == null || updateData.isEmpty()) {
-            throw new ApplicationException(ErrorCode.BAD_REQUEST);
+            throw new ApplicationException(
+                    ErrorCode.EMPTY_UPDATE_PAYLOAD,
+                    List.of(new FieldValidationError("updateData", "Update payload cannot be empty"))
+            );
         }
         dataHelper.validateRowRegex(metadata, updateData);
         dataHelper.validateRowDates(metadata, updateData);
@@ -589,7 +651,7 @@ public class DataService implements IDataService {
         kafkaPublisher.publishMutation(tableName, "UPDATE", fullPayload, userId);
 
         if (rowsAffected == 0) {
-            throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ApplicationException(ErrorCode.ROW_NOT_FOUND, id, tableName);
         }
         if (metadata.isAuditEnabled() != null && metadata.isAuditEnabled()) {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(String.format("SELECT * FROM %s WHERE id = ?;", tableName), id);
@@ -616,14 +678,15 @@ public class DataService implements IDataService {
     @Override
     @Transactional(readOnly = true)
     public Map<String, Object> findRowById(String tableName, Long id, Boolean showSensitive, Long userId) {
+        sqlIdentifierValidator.validate(tableName);
         TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
 
         String projection = dataHelper.getProjectionClause(metadata, showSensitive);
         String dataSql = String.format("SELECT %s FROM %s WHERE id = ?;", projection, tableName);
         List<Map<String, Object>> records = jdbcTemplate.queryForList(dataSql, id);
         if (records.isEmpty()) {
-            throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ApplicationException(ErrorCode.ROW_NOT_FOUND, id, tableName);
         }
         return records.getFirst();
     }
@@ -718,7 +781,12 @@ public class DataService implements IDataService {
             ResolvedRelation match = resolvedRelations.stream()
                     .filter(r -> r.relationName().equalsIgnoreCase(relName))
                     .findFirst()
-                    .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST, "Bogus relation: " + relName));
+                    .orElseThrow(() -> new ApplicationException(
+                            ErrorCode.RELATION_NOT_FOUND,
+                            List.of(new FieldValidationError("relations", "Relation '" + relName + "' does not exist on table '" + tableName + "'")),
+                            relName,
+                            tableName
+                    ));
 
             List<Map<String, Object>> relatedRows;
             String targetTable = match.targetTable();

@@ -265,6 +265,16 @@ public class DataServiceLogQueryTest extends BaseIntegrationTest {
     void shouldThrowInvalidDateFormatWhenQueryingWithMalformedTimestamp() {
         Pageable pageable = PageRequest.of(0, 10);
 
+        // Pre-create table to bypass table existence checks
+        List<ColumnMetadata> columns = new ArrayList<>();
+        ColumnMetadata col = ColumnMetadata.builder()
+                .columnName("val")
+                .dataType("VARCHAR(255)")
+                .build();
+        columns.add(col);
+        TableCreateRequest createRequest = new TableCreateRequest(columns, true);
+        metadataService.createTable(testTableName, createRequest, 0L);
+
         // Query with malformed timestamp value "invalid-date-string" for executed_at
         QueryRequest invalidRequest = new QueryRequest(
                 testTableName,

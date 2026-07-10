@@ -39,6 +39,8 @@ import java.util.UUID;
  */
 public class SandboxMcpTools {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SandboxMcpTools.class);
+
     public record McpPageResult<T>(List<T> content, int totalPages, long totalElements, int size, int number) {
         public static <T> McpPageResult<T> of(Page<T> page) {
             return new McpPageResult<>(page.getContent(), page.getTotalPages(), page.getTotalElements(), page.getSize(), page.getNumber());
@@ -157,8 +159,9 @@ public class SandboxMcpTools {
 
             return "Live database successfully copied to sandbox.";
         } finally {
-            if (dumpFile.exists()) {
-                dumpFile.delete();
+            if (dumpFile.exists() && !dumpFile.delete()) {
+                log.warn("Failed to delete temp dump file: {}", dumpFile.getAbsolutePath());
+                dumpFile.deleteOnExit();
             }
         }
     }

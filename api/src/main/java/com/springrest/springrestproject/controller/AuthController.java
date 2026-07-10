@@ -38,10 +38,10 @@ public class AuthController {
     public ResponseEntity<ApiResponse<String>> login(@RequestBody LoginRequest loginRequest) throws Exception {
         AppUser user = userService.findByUsername(loginRequest.username());
         if (user.role() == com.springrest.springrestproject.model.user.Role.MCP_AGENT) {
-            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+            throw new ApplicationException(ErrorCode.INVALID_CREDENTIALS);
         }
         if (!passwordEncoder.matches(loginRequest.password(), user.password())) {
-            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS);
+            throw new ApplicationException(ErrorCode.INVALID_CREDENTIALS);
         }
         JWTClaimsSet claimsSet = new JWTClaimsSet.Builder()
                 .subject(user.username())

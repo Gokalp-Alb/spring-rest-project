@@ -2,6 +2,7 @@ package com.springrest.springrestproject.service.implementations;
 
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.core.exception.FieldValidationError;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyInsertRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyRelationRequest;
@@ -11,12 +12,13 @@ import com.springrest.springrestproject.model.column.ColumnContext;
 import com.springrest.springrestproject.model.column.ColumnMetadata;
 import com.springrest.springrestproject.model.column.SystemColumn;
 import com.springrest.springrestproject.model.relation.*;
-import com.springrest.springrestproject.util.SecurityUtils;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.repository.RelationMetadataRepo;
 import com.springrest.springrestproject.repository.TableMetadataRepo;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
+import com.springrest.springrestproject.util.SecurityUtils;
 import com.springrest.springrestproject.validators.ColumnRelationValidator;
+import com.springrest.springrestproject.validators.SqlIdentifierValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -36,22 +38,27 @@ public class RelationService implements IRelationService {
     private final RelationMetadataRepo relationMetadataRepo;
     private final JdbcTemplate jdbcTemplate;
     private final ColumnRelationValidator columnRelationValidator;
+    private final SqlIdentifierValidator sqlIdentifierValidator;
 
     @Override
     @Transactional
     public RelationResponse createOneToOneRelation(DirectRelationRequest request, Long userId) {
+        sqlIdentifierValidator.validate(request.tableName());
+        sqlIdentifierValidator.validate(request.relatedTable());
         return createDirectRelation(request, RelationType.ONE_TO_ONE, userId);
     }
 
     @Override
     @Transactional
     public RelationResponse createManyToOneRelation(DirectRelationRequest request, Long userId) {
+        sqlIdentifierValidator.validate(request.tableName());
+        sqlIdentifierValidator.validate(request.relatedTable());
         return createDirectRelation(request, RelationType.MANY_TO_ONE, userId);
     }
 
     private RelationResponse createDirectRelation(DirectRelationRequest request, RelationType relationType, Long userId) {
         TableMetadata sourceTable = tableMetadataRepo.findByTableName(request.tableName())
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.tableName()));
 
         boolean relationExists = relationMetadataRepo.findByTableName(request.tableName()).stream()
                 .anyMatch(r -> 
@@ -61,7 +68,12 @@ public class RelationService implements IRelationService {
                 );
 
         if (relationExists) {
-            throw new ApplicationException(ErrorCode.BAD_REQUEST, "A direct relation already exists.");
+            String reason = "A direct relation to '" + request.relatedTable() + "' already exists.";
+            throw new ApplicationException(
+                    ErrorCode.RELATION_ALREADY_EXISTS,
+                    List.of(new FieldValidationError("relatedTable", reason)),
+                    request.relatedTable()
+            );
         }
 
         String targetColName = "id";
@@ -135,10 +147,12 @@ public class RelationService implements IRelationService {
     @Override
     @Transactional
     public RelationResponse createManyToManyRelation(ManyToManyRelationRequest request, Long userId) {
+        sqlIdentifierValidator.validate(request.tableName());
+        sqlIdentifierValidator.validate(request.relatedTable());
         tableMetadataRepo.findByTableName(request.tableName())
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.tableName()));
         tableMetadataRepo.findByTableName(request.relatedTable())
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.relatedTable()));
 
         String t1 = request.tableName().toLowerCase();
         String t2 = request.relatedTable().toLowerCase();
@@ -173,7 +187,11 @@ public class RelationService implements IRelationService {
         }
 
         if (tableMetadataRepo.findByTableName(junctionTableName).isPresent()) {
-            throw new ApplicationException(ErrorCode.BAD_REQUEST, "Junction table already exists: " + junctionTableName);
+            throw new ApplicationException(
+                    ErrorCode.JUNCTION_TABLE_ALREADY_EXISTS,
+                    List.of(new FieldValidationError("tableName", "Junction table already exists: " + junctionTableName)),
+                    junctionTableName
+            );
         }
 
         String createTableSql = String.format(
@@ -268,7 +286,8 @@ public class RelationService implements IRelationService {
                 null,
                 RelationType.MANY_TO_MANY,
                 sourcePolicy,
-                targetPolicy
+                targetPolicy,
+                junctionTableName
         );
     }
 
@@ -276,21 +295,26 @@ public class RelationService implements IRelationService {
     @Transactional
     public ManyToManyInsertRequest insertManyToManyDataById(Long relationId, ManyToManyInsertRequest request) {
         TableMetadata junctionTable = tableMetadataRepo.findById(relationId)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, "ID: " + relationId));
         return insertIntoJunctionTable(junctionTable, request);
     }
 
     @Override
     @Transactional
     public ManyToManyInsertRequest insertManyToManyDataByName(String tableName, ManyToManyInsertRequest request) {
+        sqlIdentifierValidator.validate(tableName);
         TableMetadata junctionTable = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
         return insertIntoJunctionTable(junctionTable, request);
     }
 
     private ManyToManyInsertRequest insertIntoJunctionTable(TableMetadata junctionTable, ManyToManyInsertRequest request) {
         if (!junctionTable.tableName().toLowerCase().endsWith("_jt")) {
-            throw new ApplicationException(ErrorCode.BAD_REQUEST, "Table is not a valid junction table");
+            throw new ApplicationException(
+                    ErrorCode.INVALID_JUNCTION_TABLE,
+                    List.of(new FieldValidationError("tableName", "Table is not a valid junction table (must end with _jt)")),
+                    junctionTable.tableName()
+            );
         }
         
         String col1 = junctionTable.columns().get(0).columnName();
@@ -309,21 +333,26 @@ public class RelationService implements IRelationService {
     @Transactional
     public void deleteManyToManyDataById(Long relationId, ManyToManyInsertRequest request) {
         TableMetadata junctionTable = tableMetadataRepo.findById(relationId)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, "ID: " + relationId));
         deleteFromJunctionTable(junctionTable, request);
     }
 
     @Override
     @Transactional
     public void deleteManyToManyDataByName(String tableName, ManyToManyInsertRequest request) {
+        sqlIdentifierValidator.validate(tableName);
         TableMetadata junctionTable = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND));
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
         deleteFromJunctionTable(junctionTable, request);
     }
 
     private void deleteFromJunctionTable(TableMetadata junctionTable, ManyToManyInsertRequest request) {
         if (!junctionTable.tableName().toLowerCase().endsWith("_jt")) {
-            throw new ApplicationException(ErrorCode.BAD_REQUEST, "Table is not a valid junction table");
+            throw new ApplicationException(
+                    ErrorCode.INVALID_JUNCTION_TABLE,
+                    List.of(new FieldValidationError("tableName", "Table is not a valid junction table (must end with _jt)")),
+                    junctionTable.tableName()
+            );
         }
         
         String col1 = junctionTable.columns().get(0).columnName();
@@ -333,7 +362,7 @@ public class RelationService implements IRelationService {
         int rowsAffected = jdbcTemplate.update(sql, request.firstTableId(), request.secondTableId());
         
         if (rowsAffected == 0) {
-            throw new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND);
+            throw new ApplicationException(ErrorCode.ROW_NOT_FOUND, request.firstTableId() + ", " + request.secondTableId(), junctionTable.tableName());
         }
     }
 
@@ -350,7 +379,8 @@ public class RelationService implements IRelationService {
                                 null,
                                 RelationType.MANY_TO_MANY,
                                 rel.sourceDeletePolicy(),
-                                rel.targetDeletePolicy()
+                                rel.targetDeletePolicy(),
+                                rel.junctionTable()
                         );
                     } else {
                         return new RelationResponse(
