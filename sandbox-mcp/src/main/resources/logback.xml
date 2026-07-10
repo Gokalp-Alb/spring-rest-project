@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Redirect ALL logging to stderr so that stdout is clean for JSON-RPC stdio communication.
+  In stdio MCP mode any output on stdout that is not valid JSON-RPC will corrupt the protocol.
+-->
+<configuration>
+    <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.err</target>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p --- [%15.15t] %-40.40logger{39} : %m%n%ex</pattern>
+        </encoder>
+    </appender>
+
+    <root level="WARN">
+        <appender-ref ref="STDERR"/>
+    </root>
+</configuration>
