@@ -237,7 +237,7 @@
                     <baselineVersion>1</baselineVersion>
                     <placeholders>
                         <!--suppress UnresolvedMavenProperty -->
-                        <mcp_readonly_password>${spring.flyway.placeholders.mcp_readonly_password}</mcp_readonly_password>
+                        <mcp_password>${spring.flyway.placeholders.mcp_password}</mcp_password>
                     </placeholders>
                 </configuration>
                 <dependencies>

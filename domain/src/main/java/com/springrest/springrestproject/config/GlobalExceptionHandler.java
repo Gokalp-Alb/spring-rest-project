@@ -38,6 +38,23 @@ public class GlobalExceptionHandler {
                 LocaleContextHolder.getLocale()
         );
         
+        String rawMessage = messageSource.getMessage(
+                errorCode.getMessageKey(),
+                null,
+                ex.getMessage(),
+                LocaleContextHolder.getLocale()
+        );
+        if (ex.getArgs() != null && ex.getArgs().length > 0 && (rawMessage == null || !rawMessage.contains("{0}"))) {
+            assert finalMessage != null;
+            StringBuilder sb = new StringBuilder(finalMessage.trim());
+            for (Object arg : ex.getArgs()) {
+                if (arg != null) {
+                    sb.append(" ").append(arg);
+                }
+            }
+            finalMessage = sb.toString();
+        }
+        
         ApiResponse<Void> apiResponse = ApiResponse.failure(status.value(), finalMessage, ex.getErrors());
         return new ResponseEntity<>(apiResponse, status);
     }

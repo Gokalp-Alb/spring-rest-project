@@ -1,5 +1,7 @@
 package com.springrest.springrestproject.mcp.tools;
 
+import com.springrest.springrestproject.core.exception.ApplicationException;
+import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
@@ -15,8 +17,10 @@ import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.model.user.AppUser;
+import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
+import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import org.flywaydb.core.Flyway;
@@ -52,6 +56,11 @@ public class SandboxMcpTools {
     private final IRelationService relationService;
     private final IUserService userService;
     private final DataSource sandboxDataSource;
+    private final IDatabaseManagementService databaseManagementService;
+    private final IPersonalAccessTokenService patService;
+
+    @Value("${mcp.pat:}")
+    private String mcpPat;
 
     @Value("${LIVE_DB_URL:}")
     private String liveDbUrl;
@@ -71,23 +80,30 @@ public class SandboxMcpTools {
     @Value("${spring.datasource.password}")
     private String sandboxDbPass;
 
-    @Value("${spring.flyway.locations:classpath:db/migration}")
-    private String flywayLocations;
-
-    @Value("${spring.flyway.placeholders.mcp_readonly_password:mcp_readonly_pword_123}")
-    private String mcpReadonlyPassword;
-
     // Generic default system user id for MCP tasks.
     private static final Long MCP_SYSTEM_USER_ID = 2L;
 
     public SandboxMcpTools(IMetadataService metadataService, IDataService dataService,
                            IRelationService relationService, IUserService userService,
-                           DataSource sandboxDataSource) {
+                           DataSource sandboxDataSource, IDatabaseManagementService databaseManagementService,
+                           IPersonalAccessTokenService patService) {
         this.metadataService = metadataService;
         this.dataService = dataService;
         this.relationService = relationService;
         this.userService = userService;
         this.sandboxDataSource = sandboxDataSource;
+        this.databaseManagementService = databaseManagementService;
+        this.patService = patService;
+    }
+
+    private Long resolveActiveUserId(boolean requireWrite) {
+        if (mcpPat == null || mcpPat.trim().isEmpty()) {
+            if (requireWrite) {
+                throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Personal Access Token (PAT) is required for write/CRUD operations.");
+            }
+            return MCP_SYSTEM_USER_ID; // Fallback to guest read-only agent ID
+        }
+        return patService.validateTokenAndGetUserId(mcpPat);
     }
 
     // ==========================================
@@ -96,20 +112,8 @@ public class SandboxMcpTools {
 
     @McpTool(description = "Drop everything in the sandbox database and recreate the default schema using Flyway. Requires confirm='yes-reset-sandbox'")
     public String resetSandboxDatabaseToDefault(String confirm) {
-        if (!"yes-reset-sandbox".equals(confirm)) {
-            throw new IllegalArgumentException("Action aborted. You must pass exactly 'yes-reset-sandbox' to confirm.");
-        }
-
-        Flyway flyway = Flyway.configure()
-                .dataSource(sandboxDataSource)
-                .locations(flywayLocations)
-                .cleanDisabled(false)
-                .placeholders(Map.of("mcp_readonly_password", mcpReadonlyPassword))
-                .load();
-
-        flyway.clean();
-        flyway.migrate();
-        return "Sandbox database successfully reset to default Flyway state.";
+        Long userId = resolveActiveUserId(true);
+        return databaseManagementService.resetDatabaseToDefault(confirm, userId);
     }
 
     @McpTool(description = "Copy the schema and data from the live database into the sandbox database. Requires confirm='yes-overwrite-sandbox'")
@@ -190,7 +194,7 @@ public class SandboxMcpTools {
         return metadataService.generateSchemaForTable(tableName);
     }
 
-    @McpTool(description = "Create a new table in the database. Note: Strict schema requires dummy values for columnContext, id, tableName, isAuditEnabled, and validationRegex must be EMAIL or PHONE.")
+    @McpTool(description = "Create a new table in the database. Note: Strict schema requires dummy values for columnContext, id, tableName, isAuditEnabled, and validationRegex must be EMAIL or PHONE or null.")
     public TableMetadata createTable(String tableName, TableCreateRequest request) {
         return metadataService.createTable(tableName, request, MCP_SYSTEM_USER_ID);
     }

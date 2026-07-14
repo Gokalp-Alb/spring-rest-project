@@ -9,9 +9,11 @@ import com.nimbusds.jwt.SignedJWT;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.response.ApiResponse;
+import com.springrest.springrestproject.dto.request.auth.PatCreationRequest;
 import com.springrest.springrestproject.dto.request.user.LoginRequest;
 import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.service.implementations.UserService;
+import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -30,6 +32,7 @@ import java.util.Date;
 public class AuthController {
     private final UserService userService;
     private final PasswordEncoder passwordEncoder;
+    private final IPersonalAccessTokenService patService;
 
     @Value("${app.jwt.secret}")
     private String tokenSecret;
@@ -59,5 +62,18 @@ public class AuthController {
         String rawToken = signedJWT.serialize();
         ApiResponse<String> apiResponse = ApiResponse.success(rawToken);
         return new ResponseEntity<>(apiResponse, HttpStatus.OK);
+    }
+
+    @PostMapping("/pat")
+    public ResponseEntity<ApiResponse<String>> createPersonalAccessToken(@RequestBody PatCreationRequest request) {
+        int expDays = request.expirationDays() != null ? request.expirationDays() : 30;
+        String rawToken = patService.createToken(
+                request.username(),
+                request.password(),
+                expDays,
+                request.tokenName()
+        );
+        ApiResponse<String> apiResponse = ApiResponse.success(rawToken);
+        return new ResponseEntity<>(apiResponse, HttpStatus.CREATED);
     }
 }

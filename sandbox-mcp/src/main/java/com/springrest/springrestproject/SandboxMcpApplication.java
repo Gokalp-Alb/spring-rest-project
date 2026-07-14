@@ -6,6 +6,8 @@ import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
+import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
+import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -23,7 +25,7 @@ public class SandboxMcpApplication {
     }
 
     @Bean
-    public SandboxMcpTools sandboxMcpTools(IMetadataService metadataService, IDataService dataService, IRelationService relationService, IUserService userService, DataSource dataSource) {
-        return new SandboxMcpTools(metadataService, dataService, relationService, userService, dataSource);
+    public SandboxMcpTools sandboxMcpTools(IMetadataService metadataService, IDataService dataService, IRelationService relationService, IUserService userService, DataSource dataSource, IDatabaseManagementService databaseManagementService, IPersonalAccessTokenService patService) {
+        return new SandboxMcpTools(metadataService, dataService, relationService, userService, dataSource, databaseManagementService, patService);
     }
 }

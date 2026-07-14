@@ -188,9 +188,11 @@ public class DataService implements IDataService {
         );
     }
 
-    private void validateQueryRequest(QueryRequest request) {
+    private void validateQueryRequest(QueryRequest request, boolean isRoot) {
         if (request == null) return;
-        sqlIdentifierValidator.validate(request.tableName());
+        if (isRoot || request.tableName() != null) {
+            sqlIdentifierValidator.validate(request.tableName());
+        }
         if (request.fields() != null) {
             for (String field : request.fields()) {
                 sqlIdentifierValidator.validate(field);
@@ -214,14 +216,14 @@ public class DataService implements IDataService {
         if (request.relations() != null) {
             for (Map.Entry<String, QueryRequest> entry : request.relations().entrySet()) {
                 sqlIdentifierValidator.validate(entry.getKey());
-                validateQueryRequest(entry.getValue());
+                validateQueryRequest(entry.getValue(), false);
             }
         }
     }
 
     @Override
     public QueryResponse executeSelect(QueryRequest request, Long userId, Pageable pageable) {
-        validateQueryRequest(request);
+        validateQueryRequest(request, true);
         if (userId != null && userId != 0L) {
             userRepo.findById(userId)
                     .orElseThrow(() -> new ApplicationException(
@@ -258,15 +260,15 @@ public class DataService implements IDataService {
         StringBuilder whereSql = new StringBuilder();
         List<Object> queryParams = new ArrayList<>();
 
+        if (request.relations() != null && !request.relations().isEmpty()) {
+            buildJoinsAndConditions("T", request.tableName(), request.relations(), joinSql, whereSql, queryParams, new AtomicInteger(0));
+        }
+
         if (request.conditions() != null && !request.conditions().isEmpty()) {
             for (int i = 0; i < request.conditions().size(); i++) {
                 if (i > 0) whereSql.append(" AND ");
                 applyCondition(request.conditions().get(i), whereSql, queryParams, false, "T");
             }
-        }
-
-        if (request.relations() != null && !request.relations().isEmpty()) {
-            buildJoinsAndConditions("T", request.tableName(), request.relations(), joinSql, whereSql, queryParams, new AtomicInteger(0));
         }
 
         sqlBuilder.append(joinSql);
@@ -331,19 +333,19 @@ public class DataService implements IDataService {
             String currentAlias = "B" + aliasCounter.getAndIncrement();
             if (RelationJoinType.M2M == match.type()) {
                 String junctionAlias = "J" + aliasCounter.getAndIncrement();
-                joinSql.append(String.format(" INNER JOIN %s %s ON %s.id = %s.%s", match.junctionTable(), junctionAlias, parentAlias, junctionAlias, match.junctionBaseCol()));
-                joinSql.append(String.format(" INNER JOIN %s %s ON %s.%s = %s.id", match.targetTable(), currentAlias, junctionAlias, match.junctionTargetCol(), currentAlias));
+                joinSql.append(String.format(" LEFT JOIN %s %s ON %s.id = %s.%s", match.junctionTable(), junctionAlias, parentAlias, junctionAlias, match.junctionBaseCol()));
+                joinSql.append(String.format(" LEFT JOIN %s %s ON %s.%s = %s.id", match.targetTable(), currentAlias, junctionAlias, match.junctionTargetCol(), currentAlias));
             } else if (RelationJoinType.FORWARD == match.type()) {
                 String relatedCol = match.targetColumn() != null ? match.targetColumn() : "id";
-                joinSql.append(String.format(" INNER JOIN %s %s ON %s.%s = %s.%s", match.targetTable(), currentAlias, parentAlias, match.baseColumn(), currentAlias, relatedCol));
+                joinSql.append(String.format(" LEFT JOIN %s %s ON %s.%s = %s.%s", match.targetTable(), currentAlias, parentAlias, match.baseColumn(), currentAlias, relatedCol));
             } else if (RelationJoinType.REVERSE == match.type()) {
-                joinSql.append(String.format(" INNER JOIN %s %s ON %s.id = %s.%s", match.targetTable(), currentAlias, parentAlias, currentAlias, match.targetColumn()));
+                joinSql.append(String.format(" LEFT JOIN %s %s ON %s.id = %s.%s", match.targetTable(), currentAlias, parentAlias, currentAlias, match.targetColumn()));
             }
 
             if (relQuery.conditions() != null && !relQuery.conditions().isEmpty()) {
                 for (QueryRequest.Condition cond : relQuery.conditions()) {
-                    if (!whereSql.isEmpty()) whereSql.append(" AND ");
-                    applyCondition(cond, whereSql, whereParams, false, currentAlias);
+                    joinSql.append(" AND ");
+                    applyCondition(cond, joinSql, whereParams, false, currentAlias);
                 }
             }
 

@@ -168,24 +168,53 @@ CREATE TABLE relation_metadata_log (
     user_id BIGINT
 );
 
--- MCP READ-ONLY AGENT ROLE
+-- PERSONAL ACCESS TOKENS FOR MCP SECURE CONNECTIONS
 
+CREATE TABLE personal_access_tokens (
+                                        id BIGSERIAL PRIMARY KEY,
+                                        token_hash VARCHAR(255) NOT NULL UNIQUE,
+                                        name VARCHAR(100) NOT NULL,
+                                        user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+                                        expires_at TIMESTAMP NOT NULL,
+                                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                                        last_used_at TIMESTAMP
+);
+
+-- MCP SYSTEM AGENT ROLE
 DO
 $$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'mcp_agent_readonly') THEN
-        CREATE ROLE mcp_agent_readonly LOGIN PASSWORD '${mcp_readonly_password}';
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'mcp_agent') THEN
+        CREATE ROLE mcp_agent LOGIN PASSWORD '${mcp_password}';
     END IF;
     
-    EXECUTE format('GRANT CONNECT ON DATABASE %I TO mcp_agent_readonly', current_database());
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO mcp_agent', current_database());
 END
 $$;
 
-GRANT USAGE ON SCHEMA public TO mcp_agent_readonly;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO mcp_agent_readonly;
-GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO mcp_agent_readonly;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mcp_agent_readonly;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO mcp_agent_readonly;
+GRANT USAGE ON SCHEMA public TO mcp_agent;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO mcp_agent;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO mcp_agent;
+GRANT UPDATE ON personal_access_tokens TO mcp_agent;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mcp_agent;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO mcp_agent;
+
+-- MCP WRITE-CAPABILITY FOR DDL REGISTRY & SCHEMA OPERATIONS
+GRANT CREATE ON SCHEMA public TO mcp_agent;
+GRANT INSERT, UPDATE, DELETE ON
+    table_metadata,
+    table_metadata_log,
+    column_metadata,
+    column_metadata_log,
+    relation_metadata,
+    relation_metadata_log,
+    system_ddl_log,
+    personal_access_tokens,
+    kafka_table_mappings,
+    kafka_table_mappings_log
+TO mcp_agent;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO mcp_agent;
+
 -- MCP SYSTEM AGENT ACCOUNT
 INSERT INTO app_users (id, username, password, role, active)
 VALUES (2, 'mcp_agent', '!disabled', 'MCP_AGENT', false)

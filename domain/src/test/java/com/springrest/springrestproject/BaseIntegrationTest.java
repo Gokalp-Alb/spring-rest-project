@@ -22,7 +22,7 @@ public abstract class BaseIntegrationTest {
         // Run migrations on the container database
         Flyway flyway = Flyway.configure()
                 .dataSource(postgresContainer.getJdbcUrl(), postgresContainer.getUsername(), postgresContainer.getPassword())
-                .placeholders(java.util.Map.of("mcp_readonly_password", "test_pword"))
+                .placeholders(java.util.Map.of("mcp_password", "test_pword"))
                 .baselineOnMigrate(true)
                 .baselineVersion("1")
                 .load();
@@ -45,6 +45,6 @@ public abstract class BaseIntegrationTest {
         registry.add("app.jwt.secret", () -> "test-jwt-secret-key-12345");
         registry.add("app.admin.username", () -> "testadmin");
         registry.add("app.admin.password", () -> "testpass");
-        registry.add("spring.flyway.placeholders.mcp_readonly_password", () -> "test_mcp_password");
+        registry.add("spring.flyway.placeholders.mcp_password", () -> "test_mcp_password");
     }
 }

@@ -4,7 +4,12 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 import com.springrest.springrestproject.mcp.tools.McpTools;
-import com.springrest.springrestproject.service.interfaces.ReadServices.*;
+import com.springrest.springrestproject.service.interfaces.IDataService;
+import com.springrest.springrestproject.service.interfaces.IMetadataService;
+import com.springrest.springrestproject.service.interfaces.IRelationService;
+import com.springrest.springrestproject.service.interfaces.IUserService;
+import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
+import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import org.springframework.context.annotation.Bean;
 
 @SpringBootApplication
@@ -15,7 +20,13 @@ public class McpServerApplication {
     }
 
     @Bean
-    public McpTools mcpTools(IMetadataReadService metadataReadService, IDataReadService dataReadService, IRelationReadService relationReadService, IUserReadService userReadService) {
-        return new McpTools(metadataReadService, dataReadService, relationReadService, userReadService);
+    public McpTools mcpTools(
+            IMetadataService metadataService,
+            IDataService dataService,
+            IRelationService relationService,
+            IUserService userService,
+            IPersonalAccessTokenService patService,
+            IDatabaseManagementService databaseManagementService) {
+        return new McpTools(metadataService, dataService, relationService, userService, patService, databaseManagementService);
     }
 }
