@@ -34,7 +34,9 @@ public enum ErrorCode {
     JUNCTION_TABLE_ALREADY_EXISTS(HttpStatus.BAD_REQUEST, "error.junction_table_already_exists"),
     INVALID_JUNCTION_TABLE(HttpStatus.BAD_REQUEST, "error.invalid_junction_table"),
     BLANK_TARGET_TABLE(HttpStatus.BAD_REQUEST, "error.blank_target_table"),
-    RELATION_NOT_FOUND(HttpStatus.NOT_FOUND, "error.relation_not_found");
+    RELATION_NOT_FOUND(HttpStatus.NOT_FOUND, "error.relation_not_found"),
+    SCRIPT_INVALID_PAYLOAD(HttpStatus.BAD_REQUEST, "error.script_invalid_payload"),
+    SCRIPT_QUERY_FAILED(HttpStatus.BAD_REQUEST, "error.script_query_failed");
 
     private final HttpStatus httpStatus;
     private final String messageKey;

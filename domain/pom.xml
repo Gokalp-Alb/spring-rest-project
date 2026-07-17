@@ -193,6 +193,22 @@
                 </configuration>
             </plugin>
             <plugin>
+                <!--
+                    Publishes a test-jar (classifier "tests") so downstream modules (e.g. scripting)
+                    can reuse BaseIntegrationTest/DomainTestApplication for their own @SpringBootTest
+                    integration tests instead of duplicating the Testcontainers/Flyway bootstrap.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>properties-maven-plugin</artifactId>
                 <version>1.2.1</version>

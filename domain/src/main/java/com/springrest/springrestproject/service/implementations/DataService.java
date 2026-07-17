@@ -221,9 +221,23 @@ public class DataService implements IDataService {
         }
     }
 
+    private int getRelationDepth(QueryRequest request) {
+        if (request == null || request.relations() == null || request.relations().isEmpty()) {
+            return 0;
+        }
+        int maxSubDepth = 0;
+        for (QueryRequest subRequest : request.relations().values()) {
+            maxSubDepth = Math.max(maxSubDepth, getRelationDepth(subRequest));
+        }
+        return 1 + maxSubDepth;
+    }
+
     @Override
     public QueryResponse executeSelect(QueryRequest request, Long userId, Pageable pageable) {
         validateQueryRequest(request, true);
+        if (getRelationDepth(request) > 3) {
+            throw new ApplicationException(ErrorCode.BAD_REQUEST, "Relation depth exceeds the maximum cap of 3 levels");
+        }
         if (userId != null && userId != 0L) {
             userRepo.findById(userId)
                     .orElseThrow(() -> new ApplicationException(

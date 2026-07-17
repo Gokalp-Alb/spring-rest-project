@@ -221,3 +221,31 @@ VALUES (2, 'mcp_agent', '!disabled', 'MCP_AGENT', false)
 ON CONFLICT (id) DO NOTHING;
 
 SELECT setval('app_users_id_seq', (SELECT MAX(id) FROM app_users));
+
+-- SCRIPTING ENGINE EXECUTION LOGS
+
+CREATE TABLE execution_logs (
+    id BIGSERIAL PRIMARY KEY,
+    execution_id VARCHAR(255) NOT NULL UNIQUE,
+    script TEXT NOT NULL,
+    caller VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    output TEXT,
+    duration_ms BIGINT,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP
+);
+
+CREATE TABLE execution_log_entries (
+    log_id BIGSERIAL PRIMARY KEY,
+    execution_id VARCHAR(255) NOT NULL,
+    level VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    sequence_number INT NOT NULL,
+    stack_trace TEXT
+);
+
+GRANT SELECT, INSERT, UPDATE ON execution_logs TO mcp_agent;
+GRANT SELECT, INSERT, UPDATE ON execution_log_entries TO mcp_agent;
