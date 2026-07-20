@@ -70,12 +70,12 @@ public class ScriptControllerTest {
     @Test
     void executeScript_shouldCallServiceAndReturnResult() throws Exception {
         String script = "const a = 1; a;";
-        Map<String, String> requestPayload = Map.of("script", script);
+        Map<String, Object> requestPayload = Map.of("script", script, "debug_enabled", false);
 
         when(rateLimiterService.isAllowed(anyString(), anyInt(), anyInt()))
                 .thenReturn(true);
 
-        when(scriptExecutionService.execute(eq(script), any(ScriptCaller.class)))
+        when(scriptExecutionService.execute(eq(script), any(ScriptCaller.class), eq(false)))
                 .thenReturn(new ScriptExecutionResponse(1, List.of()));
 
         Jwt jwt = Jwt.withTokenValue("token")
@@ -94,5 +94,31 @@ public class ScriptControllerTest {
                 .andExpect(jsonPath("$.successStatus").value("success"))
                 .andExpect(jsonPath("$.data.result").value(1))
                 .andExpect(jsonPath("$.data.logs").isArray());
+    }
+
+    @Test
+    void executeScript_withDebugEnabledTrue_passesFlagToService() throws Exception {
+        String script = "const a = 1; a;";
+        Map<String, Object> requestPayload = Map.of("script", script, "debug_enabled", true);
+
+        when(rateLimiterService.isAllowed(anyString(), anyInt(), anyInt()))
+                .thenReturn(true);
+
+        when(scriptExecutionService.execute(eq(script), any(ScriptCaller.class), eq(true)))
+                .thenReturn(new ScriptExecutionResponse(1, List.of()));
+
+        Jwt jwt = Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .claim("userId", 123L)
+                .claim("roles", "ROLE_SCRIPT_ENGINEER")
+                .build();
+        JwtAuthenticationToken auth = new JwtAuthenticationToken(jwt, List.of(() -> "ROLE_SCRIPT_ENGINEER"));
+
+        mockMvc.perform(post("/api/script")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(requestPayload))
+                .with(authentication(auth)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.result").value(1));
     }
 }

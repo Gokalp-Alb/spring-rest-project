@@ -1,7 +1,10 @@
 package com.springrest.springrestproject.mcp.tools;
 
+import com.springrest.scripting.engine.ScriptExecutionService;
+import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionResponse;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
@@ -33,6 +36,7 @@ import javax.sql.DataSource;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -58,6 +62,7 @@ public class SandboxMcpTools {
     private final DataSource sandboxDataSource;
     private final IDatabaseManagementService databaseManagementService;
     private final IPersonalAccessTokenService patService;
+    private final ScriptExecutionService scriptExecutionService;
 
     @Value("${mcp.pat:}")
     private String mcpPat;
@@ -86,7 +91,7 @@ public class SandboxMcpTools {
     public SandboxMcpTools(IMetadataService metadataService, IDataService dataService,
                            IRelationService relationService, IUserService userService,
                            DataSource sandboxDataSource, IDatabaseManagementService databaseManagementService,
-                           IPersonalAccessTokenService patService) {
+                           IPersonalAccessTokenService patService, ScriptExecutionService scriptExecutionService) {
         this.metadataService = metadataService;
         this.dataService = dataService;
         this.relationService = relationService;
@@ -94,6 +99,7 @@ public class SandboxMcpTools {
         this.sandboxDataSource = sandboxDataSource;
         this.databaseManagementService = databaseManagementService;
         this.patService = patService;
+        this.scriptExecutionService = scriptExecutionService;
     }
 
     private Long resolveActiveUserId(boolean requireWrite) {
@@ -324,5 +330,16 @@ public class SandboxMcpTools {
     @McpTool(description = "Delete a user by their internal ID")
     public void deleteUserById(Long id) {
         userService.deleteUserById(id, MCP_SYSTEM_USER_ID);
+    }
+
+    // ==========================================
+    // SCRIPTING SERVICES
+    // ==========================================
+
+    @McpTool(description = "Execute a JavaScript script against the sandbox database on the caller's behalf. Requires the SCRIPT_ENGINEER group and a valid PAT. Chrome DevTools debugging is not available over MCP (it requires a human attaching a browser) - use POST /api/script with debug_enabled=true for that instead.")
+    public ScriptExecutionResponse executeScript(String script) {
+        Long userId = resolveActiveUserId(true);
+        ScriptCaller caller = new ScriptCaller(String.valueOf(userId), Set.of("MCP"));
+        return scriptExecutionService.execute(script, caller, false);
     }
 }

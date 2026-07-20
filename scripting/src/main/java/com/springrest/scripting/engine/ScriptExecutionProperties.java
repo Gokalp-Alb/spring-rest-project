@@ -13,6 +13,5 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "script.execution")
 public record ScriptExecutionProperties(
         @DefaultValue("5000") long timeoutMs,
-        @DefaultValue("64") int memoryLimitMb,
-        @DefaultValue("false") boolean debugEnabled
+        @DefaultValue("64") int memoryLimitMb
 ) {}

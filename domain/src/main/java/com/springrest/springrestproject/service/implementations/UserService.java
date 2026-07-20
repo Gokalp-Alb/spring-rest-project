@@ -5,9 +5,12 @@ import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
 import java.util.List;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
+import com.springrest.springrestproject.dto.response.user.GroupResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.user.AppUser;
+import com.springrest.springrestproject.model.user.GroupName;
 import com.springrest.springrestproject.model.user.Role;
+import com.springrest.springrestproject.model.user.UserGroup;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
@@ -44,6 +47,7 @@ public class UserService implements IUserService {
                 .active(true)
                 .build();
         AppUser savedUser = userRepo.save(userToSave);
+        userRepo.insertRegisteredUserGroup(savedUser.id(), userId);
         String simulatedSql = String.format(
                 "INSERT INTO app_user (id, username, role, active) VALUES (%d, '%s', '%s', true);",
                 savedUser.id(),
@@ -119,5 +123,84 @@ public class UserService implements IUserService {
         String simulatedSql = String.format("UPDATE app_users SET active = false WHERE id = %d;", id);
         metadataService.logSchemaChange("app_users", simulatedSql, userId);
         userRepo.save(updatedUser);
+    }
+
+    @Override
+    @Transactional
+    public GroupResponse addGroupToUser(Long userId, GroupName groupName, Long executorId) {
+        userRepo.findById(userId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + userId));
+        if (groupName == null) {
+            throw new ApplicationException(
+                    ErrorCode.INVALID_GROUP_NAME,
+                    List.of(new FieldValidationError("groupName", "Group name must not be null")),
+                    "null"
+            );
+        }
+        if (groupName == GroupName.REGISTERED_USER) {
+            throw new ApplicationException(
+                    ErrorCode.SYSTEM_MANAGED_GROUP,
+                    List.of(new FieldValidationError("groupName", "registered_user is system-managed and cannot be assigned or removed manually"))
+            );
+        }
+        if (userRepo.existsByUserIdAndGroupName(userId, groupName)) {
+            throw new ApplicationException(
+                    ErrorCode.GROUP_ALREADY_EXISTS,
+                    List.of(new FieldValidationError("groupName", "User already has this group assigned"))
+            );
+        }
+        UserGroup saved = userRepo.saveGroup(userId, groupName, executorId);
+        return toGroupResponse(saved);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<GroupResponse> getGroupsForUser(Long userId) {
+        userRepo.findById(userId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + userId));
+        return userRepo.findGroupsByUserId(userId).stream()
+                .map(this::toGroupResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void removeGroupById(Long userId, Long groupId, Long executorId) {
+        UserGroup group = userRepo.findGroupById(groupId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.GROUP_NOT_FOUND, "ID: " + groupId));
+        if (!group.userId().equals(userId)) {
+            throw new ApplicationException(ErrorCode.GROUP_NOT_FOUND, "ID: " + groupId);
+        }
+        if (group.groupName() == GroupName.REGISTERED_USER) {
+            throw new ApplicationException(
+                    ErrorCode.SYSTEM_MANAGED_GROUP,
+                    List.of(new FieldValidationError("groupId", "registered_user is system-managed and cannot be assigned or removed manually"))
+            );
+        }
+        userRepo.deleteGroup(group, executorId);
+    }
+
+    @Override
+    @Transactional
+    public void removeGroupByName(Long userId, String groupNameRaw, Long executorId) {
+        GroupName groupName;
+        try {
+            groupName = GroupName.valueOf(groupNameRaw.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new ApplicationException(ErrorCode.INVALID_GROUP_NAME, groupNameRaw);
+        }
+        UserGroup group = userRepo.findGroupByUserIdAndName(userId, groupName)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.GROUP_NOT_FOUND, "user " + userId + ", group " + groupName));
+        if (groupName == GroupName.REGISTERED_USER) {
+            throw new ApplicationException(
+                    ErrorCode.SYSTEM_MANAGED_GROUP,
+                    List.of(new FieldValidationError("groupName", "registered_user is system-managed and cannot be assigned or removed manually"))
+            );
+        }
+        userRepo.deleteGroup(group, executorId);
+    }
+
+    private GroupResponse toGroupResponse(UserGroup group) {
+        return new GroupResponse(group.id(), group.userId(), group.groupName(), group.createdDate());
     }
 }

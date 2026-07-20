@@ -1,7 +1,9 @@
 package com.springrest.springrestproject.controller;
 
 import com.springrest.springrestproject.core.response.ApiResponse;
+import com.springrest.springrestproject.dto.request.user.GroupRequest;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
+import com.springrest.springrestproject.dto.response.user.GroupResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.service.interfaces.IUserService;
@@ -13,6 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/users")
@@ -58,6 +62,40 @@ public class UserController {
     public ApiResponse<Void> deleteUserById(@PathVariable Long id,
                                             @AuthenticationPrincipal Jwt jwt) {
         userService.deleteUserById(id, jwt.getClaim("userId"));
+        return ApiResponse.success(HttpStatus.OK.value(), null);
+    }
+
+    @PostMapping("/{userId}/groups")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<GroupResponse> addGroupToUser(@PathVariable Long userId,
+                                                      @RequestBody GroupRequest request,
+                                                      @AuthenticationPrincipal Jwt jwt) {
+        GroupResponse group = userService.addGroupToUser(userId, request.groupName(), jwt.getClaim("userId"));
+        return ApiResponse.success(HttpStatus.CREATED.value(), group);
+    }
+
+    @GetMapping("/{userId}/groups")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<List<GroupResponse>> getGroupsForUser(@PathVariable Long userId) {
+        List<GroupResponse> groups = userService.getGroupsForUser(userId);
+        return ApiResponse.success(HttpStatus.OK.value(), groups);
+    }
+
+    @DeleteMapping("/{userId}/groups/id/{groupId}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> removeGroupById(@PathVariable Long userId,
+                                              @PathVariable Long groupId,
+                                              @AuthenticationPrincipal Jwt jwt) {
+        userService.removeGroupById(userId, groupId, jwt.getClaim("userId"));
+        return ApiResponse.success(HttpStatus.OK.value(), null);
+    }
+
+    @DeleteMapping("/{userId}/groups/name/{groupName}")
+    @ResponseStatus(HttpStatus.OK)
+    public ApiResponse<Void> removeGroupByName(@PathVariable Long userId,
+                                                @PathVariable String groupName,
+                                                @AuthenticationPrincipal Jwt jwt) {
+        userService.removeGroupByName(userId, groupName, jwt.getClaim("userId"));
         return ApiResponse.success(HttpStatus.OK.value(), null);
     }
 }

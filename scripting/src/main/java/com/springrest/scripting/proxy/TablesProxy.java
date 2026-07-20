@@ -27,24 +27,26 @@ public class TablesProxy implements ProxyObject {
         this.context = context;
         this.userId = userId;
         this.methods = Map.of(
-            "select", new ScriptMethod("select", "Executes a select query on tables", "object", arguments -> {
-                if (arguments.length == 0) {
-                    throw new ApplicationException(ErrorCode.BAD_REQUEST, "select method requires a query argument");
-                }
-                try {
-                    Object hostObj = context.converter().convertToHostObject(arguments[0]);
-                    QueryRequest queryRequest = objectMapper.convertValue(hostObj, QueryRequest.class);
-                    int page = queryRequest.page() != null ? queryRequest.page() : 0;
-                    int size = queryRequest.size() != null ? queryRequest.size() : 10;
-                    Pageable pageable = PageRequest.of(page, size);
-                    return dataService.executeSelect(queryRequest, userId, pageable);
-                } catch (ApplicationException e) {
-                    throw e;
-                } catch (Exception e) {
-                    throw new ApplicationException(ErrorCode.BAD_REQUEST, "Failed to parse query: " + e.getMessage());
-                }
-            })
+            "select", new ScriptMethod("select", "Executes a select query on tables", "object", this::select)
         );
+    }
+
+    private Object select(Value... arguments) {
+        if (arguments.length == 0) {
+            throw new ApplicationException(ErrorCode.BAD_REQUEST, "select method requires a query argument");
+        }
+        try {
+            Object hostObj = context.converter().convertToHostObject(arguments[0]);
+            QueryRequest queryRequest = objectMapper.convertValue(hostObj, QueryRequest.class);
+            int page = queryRequest.page() != null ? queryRequest.page() : 0;
+            int size = queryRequest.size() != null ? queryRequest.size() : 10;
+            Pageable pageable = PageRequest.of(page, size);
+            return dataService.executeSelect(queryRequest, userId, pageable);
+        } catch (ApplicationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApplicationException(ErrorCode.BAD_REQUEST, "Failed to parse query: " + e.getMessage());
+        }
     }
 
     @Override

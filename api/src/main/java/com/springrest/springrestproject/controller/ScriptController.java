@@ -3,12 +3,12 @@ package com.springrest.springrestproject.controller;
 import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.scripting.engine.ScriptExecutionService;
 import com.springrest.springrestproject.core.response.ApiResponse;
+import com.springrest.springrestproject.dto.request.scripting.ScriptExecuteRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -23,8 +23,9 @@ public class ScriptController {
     }
 
     @PostMapping
-    public ApiResponse<Object> executeScript(@RequestBody Map<String, String> payload, Authentication authentication) {
-        String script = payload != null ? payload.get("script") : null;
+    public ApiResponse<Object> executeScript(@RequestBody ScriptExecuteRequest payload, Authentication authentication) {
+        String script = payload != null ? payload.script() : null;
+        boolean debugEnabled = payload != null && Boolean.TRUE.equals(payload.debugEnabled());
 
         String userId = null;
         if (authentication != null && authentication.getPrincipal() instanceof Jwt jwt) {
@@ -42,7 +43,7 @@ public class ScriptController {
         }
 
         ScriptCaller caller = new ScriptCaller(userId, roles);
-        Object result = scriptExecutionService.execute(script, caller);
+        Object result = scriptExecutionService.execute(script, caller, debugEnabled);
         return ApiResponse.success(result);
     }
 }

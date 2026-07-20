@@ -1,5 +1,7 @@
 package com.springrest.springrestproject.mcp.tools;
 
+import com.springrest.scripting.engine.ScriptExecutionService;
+import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
@@ -13,6 +15,7 @@ import com.springrest.springrestproject.dto.response.data.DataResponse;
 import com.springrest.springrestproject.dto.response.data.QueryResponse;
 import com.springrest.springrestproject.dto.response.relation.RelationResponse;
 import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
+import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionResponse;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.table.TableMetadata;
@@ -31,6 +34,7 @@ import org.springframework.data.domain.PageRequest;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class McpTools {
 
@@ -46,19 +50,22 @@ public class McpTools {
     private final IUserService userService;
     private final IPersonalAccessTokenService patService;
     private final IDatabaseManagementService databaseManagementService;
+    private final ScriptExecutionService scriptExecutionService;
 
     @Value("${mcp.pat:}")
     private String mcpPat;
 
     public McpTools(IMetadataService metadataService, IDataService dataService,
                     IRelationService relationService, IUserService userService,
-                    IPersonalAccessTokenService patService, IDatabaseManagementService databaseManagementService) {
+                    IPersonalAccessTokenService patService, IDatabaseManagementService databaseManagementService,
+                    ScriptExecutionService scriptExecutionService) {
         this.metadataService = metadataService;
         this.dataService = dataService;
         this.relationService = relationService;
         this.userService = userService;
         this.patService = patService;
         this.databaseManagementService = databaseManagementService;
+        this.scriptExecutionService = scriptExecutionService;
     }
 
     private Long resolveActiveUserId(boolean requireWrite) {
@@ -270,5 +277,16 @@ public class McpTools {
         Long userId = resolveActiveUserId(true);
         verifyAdminRole(userId);
         userService.deleteUserById(id, userId);
+    }
+
+    // ==========================================
+    // SCRIPTING SERVICES
+    // ==========================================
+
+    @McpTool(description = "Execute a JavaScript script against the database on the caller's behalf. Requires the SCRIPT_ENGINEER group and a valid PAT. Chrome DevTools debugging is not available over MCP (it requires a human attaching a browser) - use POST /api/script with debug_enabled=true for that instead.")
+    public ScriptExecutionResponse executeScript(String script) {
+        Long userId = resolveActiveUserId(true);
+        ScriptCaller caller = new ScriptCaller(String.valueOf(userId), Set.of("MCP"));
+        return scriptExecutionService.execute(script, caller, false);
     }
 }

@@ -1,10 +1,15 @@
 package com.springrest.springrestproject.service.interfaces;
 
 import com.springrest.springrestproject.dto.request.user.UserRequest;
+import com.springrest.springrestproject.dto.response.user.GroupResponse;
 import com.springrest.springrestproject.model.user.AppUser;
+import com.springrest.springrestproject.model.user.GroupName;
 import com.springrest.springrestproject.service.interfaces.ReadServices.IUserReadService;
 
 public interface IUserService extends IUserReadService {
     UserRequest createUser(AppUser user, Long userId);
     void deleteUserById(Long id, Long userId);
+    GroupResponse addGroupToUser(Long userId, GroupName groupName, Long executorId);
+    void removeGroupById(Long userId, Long groupId, Long executorId);
+    void removeGroupByName(Long userId, String groupName, Long executorId);
 }

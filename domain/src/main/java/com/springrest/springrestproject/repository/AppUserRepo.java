@@ -2,7 +2,9 @@ package com.springrest.springrestproject.repository;
 
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.user.AppUser;
+import com.springrest.springrestproject.model.user.GroupName;
 import com.springrest.springrestproject.model.user.Role;
+import com.springrest.springrestproject.model.user.UserGroup;
 import lombok.RequiredArgsConstructor;
 import org.jooq.DSLContext;
 import org.springframework.data.domain.Page;
@@ -16,6 +18,8 @@ import java.util.Optional;
 
 import static jooq.generated.Tables.APP_USERS;
 import static jooq.generated.Tables.APP_USERS_LOG;
+import static jooq.generated.Tables.USER_GROUPS;
+import static jooq.generated.Tables.USER_GROUPS_LOG;
 
 @Repository
 @RequiredArgsConstructor
@@ -105,6 +109,75 @@ public class AppUserRepo {
                 .set(APP_USERS_LOG.OPERATION_TYPE, operation)
                 .set(APP_USERS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
                 .set(APP_USERS_LOG.USER_ID, executorId)
+                .execute();
+    }
+
+    public List<UserGroup> findGroupsByUserId(Long userId) {
+        return dsl.selectFrom(USER_GROUPS)
+                .where(USER_GROUPS.USER_ID.eq(userId))
+                .fetchInto(UserGroup.class);
+    }
+
+    public boolean existsByUserIdAndGroupName(Long userId, GroupName groupName) {
+        return dsl.fetchExists(
+                dsl.selectOne()
+                        .from(USER_GROUPS)
+                        .where(USER_GROUPS.USER_ID.eq(userId))
+                        .and(USER_GROUPS.GROUP_NAME.eq(groupName.name()))
+        );
+    }
+
+    public Optional<UserGroup> findGroupById(Long groupId) {
+        return Optional.ofNullable(
+                dsl.selectFrom(USER_GROUPS)
+                        .where(USER_GROUPS.ID.eq(groupId))
+                        .fetchOneInto(UserGroup.class)
+        );
+    }
+
+    public Optional<UserGroup> findGroupByUserIdAndName(Long userId, GroupName groupName) {
+        return Optional.ofNullable(
+                dsl.selectFrom(USER_GROUPS)
+                        .where(USER_GROUPS.USER_ID.eq(userId))
+                        .and(USER_GROUPS.GROUP_NAME.eq(groupName.name()))
+                        .fetchOneInto(UserGroup.class)
+        );
+    }
+
+    public UserGroup saveGroup(Long userId, GroupName groupName, Long executorId) {
+        Long generatedId = Objects.requireNonNull(dsl.insertInto(USER_GROUPS)
+                        .set(USER_GROUPS.USER_ID, userId)
+                        .set(USER_GROUPS.GROUP_NAME, groupName.name())
+                        .set(USER_GROUPS.CREATOR_ID, executorId)
+                        .set(USER_GROUPS.CREATED_DATE, java.time.LocalDateTime.now())
+                        .returning(USER_GROUPS.ID)
+                        .fetchOne())
+                .getValue(USER_GROUPS.ID);
+        UserGroup savedGroup = findGroupById(generatedId).orElseThrow();
+        logUserGroupMutation(savedGroup, "POST", executorId);
+        return savedGroup;
+    }
+
+    public void deleteGroup(UserGroup group, Long executorId) {
+        logUserGroupMutation(group, "DELETE", executorId);
+        dsl.deleteFrom(USER_GROUPS)
+                .where(USER_GROUPS.ID.eq(group.id()))
+                .execute();
+    }
+
+    public void insertRegisteredUserGroup(Long userId, Long executorId) {
+        saveGroup(userId, GroupName.REGISTERED_USER, executorId);
+    }
+
+    private void logUserGroupMutation(UserGroup group, String operation, Long executorId) {
+        Long resolvedExecutorId = executorId != null ? executorId : 0L;
+        dsl.insertInto(USER_GROUPS_LOG)
+                .set(USER_GROUPS_LOG.ID, group.id())
+                .set(USER_GROUPS_LOG.USER_ID, group.userId())
+                .set(USER_GROUPS_LOG.GROUP_NAME, group.groupName().name())
+                .set(USER_GROUPS_LOG.OPERATION_TYPE, operation)
+                .set(USER_GROUPS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
+                .set(USER_GROUPS_LOG.EXECUTOR_ID, resolvedExecutorId)
                 .execute();
     }
 }

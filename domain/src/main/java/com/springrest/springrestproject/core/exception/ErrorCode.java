@@ -36,7 +36,12 @@ public enum ErrorCode {
     BLANK_TARGET_TABLE(HttpStatus.BAD_REQUEST, "error.blank_target_table"),
     RELATION_NOT_FOUND(HttpStatus.NOT_FOUND, "error.relation_not_found"),
     SCRIPT_INVALID_PAYLOAD(HttpStatus.BAD_REQUEST, "error.script_invalid_payload"),
-    SCRIPT_QUERY_FAILED(HttpStatus.BAD_REQUEST, "error.script_query_failed");
+    SCRIPT_QUERY_FAILED(HttpStatus.BAD_REQUEST, "error.script_query_failed"),
+    SCRIPT_DEBUG_SESSION_ALREADY_ACTIVE(HttpStatus.CONFLICT, "error.script_debug_session_already_active"),
+    GROUP_ALREADY_EXISTS(HttpStatus.CONFLICT, "error.group_already_exists"),
+    INVALID_GROUP_NAME(HttpStatus.BAD_REQUEST, "error.invalid_group_name"),
+    SYSTEM_MANAGED_GROUP(HttpStatus.BAD_REQUEST, "error.system_managed_group"),
+    GROUP_NOT_FOUND(HttpStatus.NOT_FOUND, "error.group_not_found");
 
     private final HttpStatus httpStatus;
     private final String messageKey;

@@ -36,4 +36,13 @@ class ScriptMessageKeysTest {
         assertEquals("The script execution failed: boom", defaultMessage);
         assertEquals("Betik çalıştırması başarısız oldu: boom", turkishMessage);
     }
+
+    @Test
+    void scriptDebugSessionAlreadyActive_resolvesInDefaultAndTurkishLocale() {
+        String defaultMessage = messageSource.getMessage("error.script_debug_session_already_active", null, Locale.ENGLISH);
+        String turkishMessage = messageSource.getMessage("error.script_debug_session_already_active", null, new Locale("tr"));
+
+        assertEquals("A script debug session is already active on port 4242. Wait for it to finish or detach Chrome DevTools before starting another.", defaultMessage);
+        assertEquals("Zaten 4242 portunda aktif bir betik hata ayıklama oturumu var. Başka bir tane başlatmadan önce mevcut oturumun bitmesini bekleyin veya Chrome DevTools bağlantısını kesin.", turkishMessage);
+    }
 }

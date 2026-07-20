@@ -12,12 +12,16 @@ import com.springrest.springrestproject.core.model.scripting.ExecutionLogEntry;
 import com.springrest.springrestproject.core.model.scripting.ExecutionStatus;
 import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionResponse;
 import com.springrest.springrestproject.dto.response.scripting.ScriptLogEntryResponse;
+import com.springrest.springrestproject.model.user.GroupName;
+import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.service.implementations.ExecutionLogService;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -26,22 +30,28 @@ import java.util.stream.Collectors;
 
 @Service
 public class ScriptExecutionService {
+    private static final Logger log = LoggerFactory.getLogger(ScriptExecutionService.class);
+
     private final ExecutionLogService logService;
     private final IDataService dataService;
     private final ScriptExecutionProperties executionProperties;
+    private final AppUserRepo appUserRepo;
 
-    public ScriptExecutionService(ExecutionLogService logService, IDataService dataService, ScriptExecutionProperties executionProperties) {
+    public ScriptExecutionService(ExecutionLogService logService, IDataService dataService, ScriptExecutionProperties executionProperties, AppUserRepo appUserRepo) {
         this.logService = logService;
         this.dataService = dataService;
         this.executionProperties = executionProperties;
+        this.appUserRepo = appUserRepo;
     }
 
-    public ScriptExecutionResponse execute(String script, ScriptCaller caller) {
+    public ScriptExecutionResponse execute(String script, ScriptCaller caller, boolean debugEnabled) {
         if (caller == null || caller.roles() == null) {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Caller roles are required");
         }
 
-        boolean isAuthorized = true; //TODO write a role based system to check authorization
+        Long userId = parseUserId(caller.userId());
+        boolean isAuthorized = userId != null && appUserRepo.findGroupsByUserId(userId).stream()
+                .anyMatch(group -> group.groupName() == GroupName.SCRIPT_ENGINEER);
         if (!isAuthorized) {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Caller does not have SCRIPT_ENGINEER role");
         }
@@ -54,24 +64,22 @@ public class ScriptExecutionService {
         }
 
         String executionId = UUID.randomUUID().toString();
-        String callerId = caller.userId() != null ? caller.userId() : "anonymous";
+        String callerId = caller.userId();
         logService.logStart(executionId, script, callerId);
 
         ValueToJsonConverter converter = new ValueToJsonConverter();
         ScriptExecutionContext executionContext = new ScriptExecutionContext(executionId, logService, converter);
         ConsoleLogProxy consoleProxy = new ConsoleLogProxy(executionContext);
 
-        Long userId = null;
-        if (caller.userId() != null) {
-            try {
-                userId = Long.valueOf(caller.userId());
-            } catch (NumberFormatException ignored) {}
-        }
         TablesProxy tablesProxy = new TablesProxy(dataService, executionContext, userId);
+
+        if (debugEnabled) {
+            log.warn("Starting script execution {} in debug mode on port 4242 - the timeout watchdog is disabled for this execution.", executionId);
+        }
 
         ScriptExecutionOptions options = new ScriptExecutionOptions(
                 executionProperties.timeoutMs(),
-                executionProperties.debugEnabled(),
+                debugEnabled,
                 executionProperties.memoryLimitMb()
         );
 
@@ -84,7 +92,13 @@ public class ScriptExecutionService {
         Context context = ScriptContextFactory.createContext(consoleProxy, tablesProxy, options);
         try {
             Source source = Source.newBuilder("js", script, "script.js").build();
-            Value result = ScriptContextFactory.evalWithTimeout(context, source, options.timeoutMs());
+            // Full end-to-end coverage of the debug-suspend path is intentionally not automated:
+            // a real Chrome DevTools client must attach to the inspector port, so verification
+            // requires manual testing. This conditional simply routes to the non-timeout path
+            // when debugEnabled=true.
+            Value result = options.debugEnabled()
+                    ? ScriptContextFactory.evalWithoutTimeout(context, source)
+                    : ScriptContextFactory.evalWithTimeout(context, source, options.timeoutMs());
             Object hostObj = converter.convertToHostObject(result);
             String output = converter.convert(result);
             logService.logSuccess(executionId, output);
@@ -113,7 +127,20 @@ public class ScriptExecutionService {
                 if (!pe.isCancelled()) {
                     throw pe;
                 }
+            } finally {
+                ScriptContextFactory.releaseDebugSession(options);
             }
+        }
+    }
+
+    private Long parseUserId(String rawUserId) {
+        if (rawUserId == null) {
+            return null;
+        }
+        try {
+            return Long.valueOf(rawUserId);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

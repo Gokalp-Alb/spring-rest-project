@@ -249,3 +249,30 @@ CREATE TABLE execution_log_entries (
 
 GRANT SELECT, INSERT, UPDATE ON execution_logs TO mcp_agent;
 GRANT SELECT, INSERT, UPDATE ON execution_log_entries TO mcp_agent;
+
+-- USER GROUPS
+
+CREATE TABLE user_groups (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    group_name VARCHAR(50) NOT NULL,
+    creator_id BIGINT,
+    created_date TIMESTAMP,
+    last_updater_id BIGINT,
+    last_changed_date TIMESTAMP,
+    UNIQUE (user_id, group_name)
+);
+
+CREATE TABLE user_groups_log (
+    log_id BIGSERIAL PRIMARY KEY,
+    id BIGINT,
+    user_id BIGINT,
+    group_name VARCHAR(50),
+    operation_type VARCHAR(50),
+    executed_at TIMESTAMP,
+    executor_id BIGINT
+);
+
+INSERT INTO user_groups (user_id, group_name, created_date)
+VALUES (2, 'REGISTERED_USER', CURRENT_TIMESTAMP)
+ON CONFLICT DO NOTHING;

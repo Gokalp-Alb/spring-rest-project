@@ -2,7 +2,9 @@ package com.springrest.springrestproject;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
+import com.springrest.scripting.engine.ScriptExecutionService;
 import com.springrest.springrestproject.mcp.tools.McpTools;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -12,8 +14,9 @@ import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenS
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import org.springframework.context.annotation.Bean;
 
-@SpringBootApplication
-@org.springframework.context.annotation.ComponentScan(excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE, classes = {com.springrest.springrestproject.config.AdminInitializerConfig.class}))
+@SpringBootApplication(scanBasePackages = "com.springrest")
+@ConfigurationPropertiesScan(basePackages = "com.springrest")
+@org.springframework.context.annotation.ComponentScan(basePackages = "com.springrest", excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE, classes = {com.springrest.springrestproject.config.AdminInitializerConfig.class}))
 public class McpServerApplication {
     public static void main(String[] args) {
         SpringApplication.run(McpServerApplication.class, args);
@@ -26,7 +29,8 @@ public class McpServerApplication {
             IRelationService relationService,
             IUserService userService,
             IPersonalAccessTokenService patService,
-            IDatabaseManagementService databaseManagementService) {
-        return new McpTools(metadataService, dataService, relationService, userService, patService, databaseManagementService);
+            IDatabaseManagementService databaseManagementService,
+            ScriptExecutionService scriptExecutionService) {
+        return new McpTools(metadataService, dataService, relationService, userService, patService, databaseManagementService, scriptExecutionService);
     }
 }

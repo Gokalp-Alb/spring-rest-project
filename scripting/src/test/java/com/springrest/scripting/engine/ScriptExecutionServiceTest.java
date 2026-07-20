@@ -8,13 +8,19 @@ import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.model.scripting.ExecutionStatus;
 import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionResponse;
 import com.springrest.springrestproject.model.ExecutionLog;
+import com.springrest.springrestproject.model.user.AppUser;
+import com.springrest.springrestproject.model.user.GroupName;
+import com.springrest.springrestproject.model.user.Role;
+import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.repository.ExecutionLogRepo;
 import com.springrest.springrestproject.service.implementations.ExecutionLogService;
 import com.springrest.springrestproject.service.interfaces.IDataService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.TestPropertySource;
 
 import java.util.Optional;
@@ -35,8 +41,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(classes = DomainTestApplication.class)
 @TestPropertySource(properties = {
         "script.execution.timeout-ms=5000",
-        "script.execution.memory-limit-mb=64",
-        "script.execution.debug-enabled=false"
+        "script.execution.memory-limit-mb=64"
 })
 class ScriptExecutionServiceTest extends BaseIntegrationTest {
 
@@ -53,7 +58,38 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
     private ExecutionLogRepo executionLogRepo;
 
     @Autowired
+    private AppUserRepo appUserRepo;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    private Long scriptEngineerUserId;
+    private Long noGroupUserId;
+
+    @BeforeEach
+    void setUpCallers() {
+        jdbcTemplate.execute("DELETE FROM app_users WHERE username IN ('script_exec_test_engineer', 'script_exec_test_no_group')");
+
+        AppUser engineer = AppUser.builder()
+                .username("script_exec_test_engineer")
+                .password(passwordEncoder.encode("password123"))
+                .role(Role.USER)
+                .active(true)
+                .build();
+        scriptEngineerUserId = appUserRepo.save(engineer).id();
+        appUserRepo.saveGroup(scriptEngineerUserId, GroupName.SCRIPT_ENGINEER, 1L);
+
+        AppUser noGroupUser = AppUser.builder()
+                .username("script_exec_test_no_group")
+                .password(passwordEncoder.encode("password123"))
+                .role(Role.USER)
+                .active(true)
+                .build();
+        noGroupUserId = appUserRepo.save(noGroupUser).id();
+    }
 
     private ExecutionLog findLogByScript(String script) {
         Long id = jdbcTemplate.queryForObject(
@@ -68,10 +104,10 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
 
     @Test
     void execute_returnsResultAndCollectedLogs() {
-        ScriptCaller caller = new ScriptCaller("1", Set.of("SCRIPT_ENGINEER"));
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
         String script = "console.log('hello'); console.warn('careful'); 1 + 2;";
 
-        ScriptExecutionResponse response = scriptExecutionService.execute(script, caller);
+        ScriptExecutionResponse response = scriptExecutionService.execute(script, caller, false);
 
         assertEquals(3, response.result());
         assertEquals(2, response.logs().size());
@@ -83,31 +119,31 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
 
     @Test
     void execute_throwsWhenCallerLacksScriptEngineerRole() {
-        ScriptCaller caller = new ScriptCaller("1", Set.of("VIEWER"));
+        ScriptCaller caller = new ScriptCaller(String.valueOf(noGroupUserId), Set.of());
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute("1;", caller)
+                scriptExecutionService.execute("1;", caller, false)
         );
         assertEquals(ErrorCode.UNAUTHORIZED_ACCESS, ex.getErrorCode());
     }
 
     @Test
     void execute_throwsWhenScriptExceedsSizeLimit() {
-        ScriptCaller caller = new ScriptCaller("1", Set.of("SCRIPT_ENGINEER"));
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
         String oversized = "1".repeat(100_001);
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute(oversized, caller)
+                scriptExecutionService.execute(oversized, caller, false)
         );
         assertEquals(ErrorCode.SCRIPT_INVALID_PAYLOAD, ex.getErrorCode());
     }
 
     @Test
     void execute_wrapsRuntimeScriptErrorsAsApplicationException() {
-        ScriptCaller caller = new ScriptCaller("1", Set.of("SCRIPT_ENGINEER"));
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute("throw new Error('boom');", caller)
+                scriptExecutionService.execute("throw new Error('boom');", caller, false)
         );
         assertEquals(ErrorCode.SCRIPT_QUERY_FAILED, ex.getErrorCode());
     }
@@ -124,13 +160,13 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
      */
     @Test
     void execute_cancelsScriptThatExceedsTimeoutWithoutDoubleCloseMaskingTheFailure() {
-        ScriptCaller caller = new ScriptCaller("1", Set.of("SCRIPT_ENGINEER"));
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
         ScriptExecutionService shortTimeoutService = new ScriptExecutionService(
-                logService, dataService, new ScriptExecutionProperties(200L, 64, false));
+                logService, dataService, new ScriptExecutionProperties(200L, 64), appUserRepo);
         String script = "while(true){} // timeout-regression-" + System.nanoTime();
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                shortTimeoutService.execute(script, caller)
+                shortTimeoutService.execute(script, caller, false)
         );
 
         assertEquals(ErrorCode.SCRIPT_QUERY_FAILED, ex.getErrorCode());
@@ -152,11 +188,11 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
      */
     @Test
     void execute_persistsResolvedApplicationExceptionDetailNotBareMessageKey() {
-        ScriptCaller caller = new ScriptCaller("1", Set.of("SCRIPT_ENGINEER"));
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
         String script = "tables.select({tableName: 'test_table', page: 'not-a-number'}); // " + System.nanoTime();
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute(script, caller)
+                scriptExecutionService.execute(script, caller, false)
         );
         assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
 
