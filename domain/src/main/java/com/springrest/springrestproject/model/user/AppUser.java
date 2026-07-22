@@ -7,6 +7,5 @@ public record AppUser(
     Long id,
     String username,
     String password,
-    Role role,
     Boolean active
 ) {}

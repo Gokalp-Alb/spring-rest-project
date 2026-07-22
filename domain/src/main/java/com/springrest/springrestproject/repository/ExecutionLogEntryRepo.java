@@ -9,35 +9,36 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
-import static jooq.generated.Tables.EXECUTION_LOG_ENTRIES;
+import static jooq.generated.Tables.SYS_EXECUTION_LOG_ENTRIES;
 
 @Repository
 @RequiredArgsConstructor
 public class ExecutionLogEntryRepo {
     private final DSLContext dsl;
+    // NOTE: If update/delete methods are added in the future, inject SystemGovernanceGuard and call assertRowMutable(...) first, matching other system-table repos.
 
     @Transactional(readOnly = true)
     public int countByExecutionId(String executionId) {
-        return dsl.fetchCount(dsl.selectFrom(EXECUTION_LOG_ENTRIES)
-                .where(EXECUTION_LOG_ENTRIES.EXECUTION_ID.eq(executionId)));
+        return dsl.fetchCount(dsl.selectFrom(SYS_EXECUTION_LOG_ENTRIES)
+                .where(SYS_EXECUTION_LOG_ENTRIES.EXECUTION_ID.eq(executionId)));
     }
 
     @Transactional
     public void insert(ExecutionLogEntry entry) {
-        dsl.insertInto(EXECUTION_LOG_ENTRIES)
-                .set(EXECUTION_LOG_ENTRIES.EXECUTION_ID, entry.executionId())
-                .set(EXECUTION_LOG_ENTRIES.LEVEL, entry.level().name())
-                .set(EXECUTION_LOG_ENTRIES.MESSAGE, entry.message())
-                .set(EXECUTION_LOG_ENTRIES.SEQUENCE_NUMBER, entry.sequenceNumber())
-                .set(EXECUTION_LOG_ENTRIES.STACK_TRACE, entry.stackTrace())
+        dsl.insertInto(SYS_EXECUTION_LOG_ENTRIES)
+                .set(SYS_EXECUTION_LOG_ENTRIES.EXECUTION_ID, entry.executionId())
+                .set(SYS_EXECUTION_LOG_ENTRIES.LEVEL, entry.level().name())
+                .set(SYS_EXECUTION_LOG_ENTRIES.MESSAGE, entry.message())
+                .set(SYS_EXECUTION_LOG_ENTRIES.SEQUENCE_NUMBER, entry.sequenceNumber())
+                .set(SYS_EXECUTION_LOG_ENTRIES.STACK_TRACE, entry.stackTrace())
                 .execute();
     }
 
     @Transactional(readOnly = true)
     public List<ExecutionLogEntry> findByExecutionIdOrderBySequence(String executionId) {
-        return dsl.selectFrom(EXECUTION_LOG_ENTRIES)
-                .where(EXECUTION_LOG_ENTRIES.EXECUTION_ID.eq(executionId))
-                .orderBy(EXECUTION_LOG_ENTRIES.SEQUENCE_NUMBER.asc())
+        return dsl.selectFrom(SYS_EXECUTION_LOG_ENTRIES)
+                .where(SYS_EXECUTION_LOG_ENTRIES.EXECUTION_ID.eq(executionId))
+                .orderBy(SYS_EXECUTION_LOG_ENTRIES.SEQUENCE_NUMBER.asc())
                 .fetch()
                 .map(record -> new ExecutionLogEntry(
                         record.getLogId(),

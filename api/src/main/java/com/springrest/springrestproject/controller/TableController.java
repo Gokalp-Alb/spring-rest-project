@@ -11,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +30,7 @@ public class TableController {
 
     @PostMapping("/{tableName}")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('DATABASE_ADMIN')")
     public ApiResponse<TableResponse> createTable(@Valid @RequestBody TableCreateRequest request,
                                                   @AuthenticationPrincipal Jwt jwt,
                                                   @PathVariable String tableName) {
@@ -62,6 +64,7 @@ public class TableController {
 
     @DeleteMapping("/{tableName}")
     @ResponseStatus(HttpStatus.OK)
+    @PreAuthorize("hasRole('DATABASE_ADMIN')")
     public ApiResponse<TableResponse> deleteTable(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable String tableName) {

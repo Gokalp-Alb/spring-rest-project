@@ -7,7 +7,6 @@ import com.springrest.springrestproject.dto.request.user.UserRequest;
 import com.springrest.springrestproject.dto.response.user.GroupResponse;
 import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.model.user.GroupName;
-import com.springrest.springrestproject.model.user.Role;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,11 +31,10 @@ class UserGroupServiceIntegrationTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("DELETE FROM app_users WHERE username = 'group_service_test_user'");
+        jdbcTemplate.execute("DELETE FROM sys_app_users WHERE username = 'group_service_test_user'");
         AppUser newUser = AppUser.builder()
                 .username("group_service_test_user")
                 .password("password123")
-                .role(Role.USER)
                 .build();
         UserRequest created = userService.createUser(newUser, 1L);
         testUserId = created.id();

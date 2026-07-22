@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.Optional;
 
-import static jooq.generated.Tables.PERSONAL_ACCESS_TOKENS;
+import static jooq.generated.Tables.SYS_PERSONAL_ACCESS_TOKENS;
 
 @Repository
 @RequiredArgsConstructor
@@ -18,30 +18,33 @@ public class PersonalAccessTokenRepo {
 
     public Optional<PersonalAccessToken> findByTokenHash(String tokenHash) {
         return Optional.ofNullable(
-                dsl.selectFrom(PERSONAL_ACCESS_TOKENS)
-                        .where(PERSONAL_ACCESS_TOKENS.TOKEN_HASH.eq(tokenHash))
+                dsl.select(SYS_PERSONAL_ACCESS_TOKENS.ID, SYS_PERSONAL_ACCESS_TOKENS.TOKEN_HASH, SYS_PERSONAL_ACCESS_TOKENS.NAME,
+                        SYS_PERSONAL_ACCESS_TOKENS.USER_ID, SYS_PERSONAL_ACCESS_TOKENS.EXPIRES_AT,
+                        SYS_PERSONAL_ACCESS_TOKENS.CREATED_AT, SYS_PERSONAL_ACCESS_TOKENS.LAST_USED_AT)
+                        .from(SYS_PERSONAL_ACCESS_TOKENS)
+                        .where(SYS_PERSONAL_ACCESS_TOKENS.TOKEN_HASH.eq(tokenHash))
                         .fetchOneInto(PersonalAccessToken.class)
         );
     }
 
     public void deleteByUserId(Long userId) {
-        dsl.deleteFrom(PERSONAL_ACCESS_TOKENS)
-                .where(PERSONAL_ACCESS_TOKENS.USER_ID.eq(userId))
+        dsl.deleteFrom(SYS_PERSONAL_ACCESS_TOKENS)
+                .where(SYS_PERSONAL_ACCESS_TOKENS.USER_ID.eq(userId))
                 .execute();
     }
 
     public PersonalAccessToken save(PersonalAccessToken pat) {
         if (pat.id() == null) {
-            Long generatedId = Objects.requireNonNull(dsl.insertInto(PERSONAL_ACCESS_TOKENS)
-                            .set(PERSONAL_ACCESS_TOKENS.TOKEN_HASH, pat.tokenHash())
-                            .set(PERSONAL_ACCESS_TOKENS.NAME, pat.name())
-                            .set(PERSONAL_ACCESS_TOKENS.USER_ID, pat.userId())
-                            .set(PERSONAL_ACCESS_TOKENS.EXPIRES_AT, pat.expiresAt())
-                            .set(PERSONAL_ACCESS_TOKENS.CREATED_AT, pat.createdAt() != null ? pat.createdAt() : LocalDateTime.now())
-                            .set(PERSONAL_ACCESS_TOKENS.LAST_USED_AT, pat.lastUsedAt())
-                            .returning(PERSONAL_ACCESS_TOKENS.ID)
+            Long generatedId = Objects.requireNonNull(dsl.insertInto(SYS_PERSONAL_ACCESS_TOKENS)
+                            .set(SYS_PERSONAL_ACCESS_TOKENS.TOKEN_HASH, pat.tokenHash())
+                            .set(SYS_PERSONAL_ACCESS_TOKENS.NAME, pat.name())
+                            .set(SYS_PERSONAL_ACCESS_TOKENS.USER_ID, pat.userId())
+                            .set(SYS_PERSONAL_ACCESS_TOKENS.EXPIRES_AT, pat.expiresAt())
+                            .set(SYS_PERSONAL_ACCESS_TOKENS.CREATED_AT, pat.createdAt() != null ? pat.createdAt() : LocalDateTime.now())
+                            .set(SYS_PERSONAL_ACCESS_TOKENS.LAST_USED_AT, pat.lastUsedAt())
+                            .returning(SYS_PERSONAL_ACCESS_TOKENS.ID)
                             .fetchOne())
-                    .getValue(PERSONAL_ACCESS_TOKENS.ID);
+                    .getValue(SYS_PERSONAL_ACCESS_TOKENS.ID);
             return new PersonalAccessToken(
                     generatedId,
                     pat.tokenHash(),
@@ -52,22 +55,22 @@ public class PersonalAccessTokenRepo {
                     pat.lastUsedAt()
             );
         } else {
-            dsl.update(PERSONAL_ACCESS_TOKENS)
-                    .set(PERSONAL_ACCESS_TOKENS.TOKEN_HASH, pat.tokenHash())
-                    .set(PERSONAL_ACCESS_TOKENS.NAME, pat.name())
-                    .set(PERSONAL_ACCESS_TOKENS.USER_ID, pat.userId())
-                    .set(PERSONAL_ACCESS_TOKENS.EXPIRES_AT, pat.expiresAt())
-                    .set(PERSONAL_ACCESS_TOKENS.LAST_USED_AT, pat.lastUsedAt())
-                    .where(PERSONAL_ACCESS_TOKENS.ID.eq(pat.id()))
+            dsl.update(SYS_PERSONAL_ACCESS_TOKENS)
+                    .set(SYS_PERSONAL_ACCESS_TOKENS.TOKEN_HASH, pat.tokenHash())
+                    .set(SYS_PERSONAL_ACCESS_TOKENS.NAME, pat.name())
+                    .set(SYS_PERSONAL_ACCESS_TOKENS.USER_ID, pat.userId())
+                    .set(SYS_PERSONAL_ACCESS_TOKENS.EXPIRES_AT, pat.expiresAt())
+                    .set(SYS_PERSONAL_ACCESS_TOKENS.LAST_USED_AT, pat.lastUsedAt())
+                    .where(SYS_PERSONAL_ACCESS_TOKENS.ID.eq(pat.id()))
                     .execute();
             return pat;
         }
     }
 
     public void updateLastUsedAt(Long id, LocalDateTime lastUsedAt) {
-        dsl.update(PERSONAL_ACCESS_TOKENS)
-                .set(PERSONAL_ACCESS_TOKENS.LAST_USED_AT, lastUsedAt)
-                .where(PERSONAL_ACCESS_TOKENS.ID.eq(id))
+        dsl.update(SYS_PERSONAL_ACCESS_TOKENS)
+                .set(SYS_PERSONAL_ACCESS_TOKENS.LAST_USED_AT, lastUsedAt)
+                .where(SYS_PERSONAL_ACCESS_TOKENS.ID.eq(id))
                 .execute();
     }
 }

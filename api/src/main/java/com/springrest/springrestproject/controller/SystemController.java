@@ -24,12 +24,22 @@ public class SystemController {
     public ApiResponse<String> resetDatabase(
             @RequestParam String confirm,
             @AuthenticationPrincipal Jwt jwt) {
-        
-        Long userId = jwt != null && jwt.hasClaim("userId") 
-                ? ((Number) Objects.requireNonNull(jwt.getClaim("userId"))).longValue() 
+
+        Long userId = jwt != null && jwt.hasClaim("userId")
+                ? ((Number) Objects.requireNonNull(jwt.getClaim("userId"))).longValue()
                 : null;
-                
+
         String result = databaseManagementService.resetDatabaseToDefault(confirm, userId);
+        return ApiResponse.success(HttpStatus.OK.value(), result);
+    }
+
+    @PostMapping("/evict-cache")
+    public ApiResponse<String> evictAllCache(@AuthenticationPrincipal Jwt jwt) {
+        Long userId = jwt != null && jwt.hasClaim("userId")
+                ? ((Number) Objects.requireNonNull(jwt.getClaim("userId"))).longValue()
+                : null;
+
+        String result = databaseManagementService.evictAllCache(userId);
         return ApiResponse.success(HttpStatus.OK.value(), result);
     }
 }

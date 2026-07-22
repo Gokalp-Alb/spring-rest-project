@@ -3,7 +3,6 @@ package com.springrest.springrestproject.repository;
 import com.springrest.springrestproject.BaseIntegrationTest;
 import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.model.user.GroupName;
-import com.springrest.springrestproject.model.user.Role;
 import com.springrest.springrestproject.model.user.UserGroup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,11 +32,10 @@ class AppUserRepoGroupTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("DELETE FROM app_users WHERE username = 'group_repo_test_user'");
+        jdbcTemplate.execute("DELETE FROM sys_app_users WHERE username = 'group_repo_test_user'");
         AppUser user = AppUser.builder()
                 .username("group_repo_test_user")
                 .password(passwordEncoder.encode("password123"))
-                .role(Role.USER)
                 .active(true)
                 .build();
         testUser = appUserRepo.save(user);
@@ -99,7 +97,7 @@ class AppUserRepoGroupTest extends BaseIntegrationTest {
     void shouldCascadeDeleteGroupsWhenUserIsHardDeleted() {
         appUserRepo.saveGroup(testUser.id(), GroupName.SCRIPT_ENGINEER, 1L);
 
-        jdbcTemplate.update("DELETE FROM app_users WHERE id = ?", testUser.id());
+        jdbcTemplate.update("DELETE FROM sys_app_users WHERE id = ?", testUser.id());
 
         assertTrue(appUserRepo.findGroupsByUserId(testUser.id()).isEmpty());
     }

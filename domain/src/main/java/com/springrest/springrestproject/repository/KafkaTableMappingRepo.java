@@ -1,5 +1,6 @@
 package com.springrest.springrestproject.repository;
 
+import com.springrest.springrestproject.core.governance.SystemGovernanceGuard;
 import com.springrest.springrestproject.model.KafkaTableMapping;
 import lombok.RequiredArgsConstructor;
 import org.jooq.DSLContext;
@@ -9,49 +10,54 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import static jooq.generated.Tables.KAFKA_TABLE_MAPPINGS;
-import static jooq.generated.Tables.KAFKA_TABLE_MAPPINGS_LOG;
+import static jooq.generated.Tables.SYS_KAFKA_TABLE_MAPPINGS;
+import static jooq.generated.Tables.SYS_KAFKA_TABLE_MAPPINGS_LOG;
 
 @Repository
 @RequiredArgsConstructor
 public class KafkaTableMappingRepo {
     private final DSLContext dsl;
+    private final SystemGovernanceGuard governanceGuard;
 
     public List<KafkaTableMapping> findByDirectionAndActiveTrue(String direction) {
-        return dsl.selectFrom(KAFKA_TABLE_MAPPINGS)
-                .where(KAFKA_TABLE_MAPPINGS.DIRECTION.eq(direction))
-                .and(KAFKA_TABLE_MAPPINGS.ACTIVE.eq(true))
+        return dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
+                .where(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION.eq(direction))
+                .and(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE.eq(true))
                 .fetchInto(KafkaTableMapping.class);
     }
 
     public Optional<KafkaTableMapping> findByTableNameAndDirectionAndActiveTrue(String tableName, String direction) {
         return Optional.ofNullable(
-                dsl.selectFrom(KAFKA_TABLE_MAPPINGS)
-                        .where(KAFKA_TABLE_MAPPINGS.TABLE_NAME.eq(tableName))
-                        .and(KAFKA_TABLE_MAPPINGS.DIRECTION.eq(direction))
-                        .and(KAFKA_TABLE_MAPPINGS.ACTIVE.eq(true))
+                dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
+                        .where(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME.eq(tableName))
+                        .and(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION.eq(direction))
+                        .and(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE.eq(true))
                         .fetchOneInto(KafkaTableMapping.class)
         );
     }
 
     public Optional<KafkaTableMapping> findById(Long id) {
         return Optional.ofNullable(
-                dsl.selectFrom(KAFKA_TABLE_MAPPINGS)
-                        .where(KAFKA_TABLE_MAPPINGS.ID.eq(id))
+                dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
+                        .where(SYS_KAFKA_TABLE_MAPPINGS.ID.eq(id))
                         .fetchOneInto(KafkaTableMapping.class)
         );
     }
 
+    public List<KafkaTableMapping> findAll() {
+        return dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS).fetchInto(KafkaTableMapping.class);
+    }
+
     public KafkaTableMapping save(KafkaTableMapping mapping) {
         if (mapping.id() == null) {
-            Long generatedId = Objects.requireNonNull(dsl.insertInto(KAFKA_TABLE_MAPPINGS)
-                            .set(KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
-                            .set(KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
-                            .set(KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
-                            .set(KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
-                            .returning(KAFKA_TABLE_MAPPINGS.ID)
+            Long generatedId = Objects.requireNonNull(dsl.insertInto(SYS_KAFKA_TABLE_MAPPINGS)
+                            .set(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
+                            .set(SYS_KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
+                            .set(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
+                            .set(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
+                            .returning(SYS_KAFKA_TABLE_MAPPINGS.ID)
                             .fetchOne())
-                    .getValue(KAFKA_TABLE_MAPPINGS.ID);
+                    .getValue(SYS_KAFKA_TABLE_MAPPINGS.ID);
             KafkaTableMapping savedMapping = KafkaTableMapping.builder()
                     .id(generatedId)
                     .tableName(mapping.tableName())
@@ -62,12 +68,16 @@ public class KafkaTableMappingRepo {
             logKafkaTableMappingMutation(savedMapping, "POST");
             return savedMapping;
         } else {
-            dsl.update(KAFKA_TABLE_MAPPINGS)
-                    .set(KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
-                    .set(KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
-                    .set(KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
-                    .set(KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
-                    .where(KAFKA_TABLE_MAPPINGS.ID.eq(mapping.id()))
+            Boolean currentRestricted = dsl.select(SYS_KAFKA_TABLE_MAPPINGS.IS_RESTRICTED)
+                    .from(SYS_KAFKA_TABLE_MAPPINGS).where(SYS_KAFKA_TABLE_MAPPINGS.ID.eq(mapping.id()))
+                    .fetchOne(SYS_KAFKA_TABLE_MAPPINGS.IS_RESTRICTED);
+            governanceGuard.assertRowMutable(Boolean.TRUE.equals(currentRestricted));
+            dsl.update(SYS_KAFKA_TABLE_MAPPINGS)
+                    .set(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
+                    .set(SYS_KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
+                    .set(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
+                    .set(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
+                    .where(SYS_KAFKA_TABLE_MAPPINGS.ID.eq(mapping.id()))
                     .execute();
             logKafkaTableMappingMutation(mapping, "PUT");
             return mapping;
@@ -79,15 +89,15 @@ public class KafkaTableMappingRepo {
         if (executorId == null) {
             executorId = 0L;
         }
-        dsl.insertInto(KAFKA_TABLE_MAPPINGS_LOG)
-                .set(KAFKA_TABLE_MAPPINGS_LOG.ID, mapping.id())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.ACTIVE, mapping.active())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.DIRECTION, mapping.direction())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.KAFKA_TOPIC, mapping.kafkaTopic())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.TABLE_NAME, mapping.tableName())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.OPERATION_TYPE, operation)
-                .set(KAFKA_TABLE_MAPPINGS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
-                .set(KAFKA_TABLE_MAPPINGS_LOG.USER_ID, executorId)
+        dsl.insertInto(SYS_KAFKA_TABLE_MAPPINGS_LOG)
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.ID, mapping.id())
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.ACTIVE, mapping.active())
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.DIRECTION, mapping.direction())
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.KAFKA_TOPIC, mapping.kafkaTopic())
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.TABLE_NAME, mapping.tableName())
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.OPERATION_TYPE, operation)
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.USER_ID, executorId)
                 .execute();
     }
 }

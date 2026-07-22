@@ -41,8 +41,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/users/**").hasRole("ADMIN")
-                        .requestMatchers("/api/tables/**").hasAnyRole("ADMIN", "USER")
-                        .requestMatchers("/api/queries/**").hasAnyRole("ADMIN", "USER")
+                        .requestMatchers("/api/tables/**").hasRole("REGISTERED_USER")
+                        .requestMatchers("/api/queries/**").hasRole("REGISTERED_USER")
+                        .requestMatchers("/api/script/**").hasRole("SCRIPT_ENGINEER")
+                        .requestMatchers("/api/kafka-mappings/**").hasRole("KAFKA_ENGINEER")
                         .anyRequest().access(new WebExpressionAuthorizationManager(
                                 "isAuthenticated() and !hasRole('MCP_AGENT')"))
                 )

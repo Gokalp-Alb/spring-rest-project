@@ -13,5 +13,6 @@ public record ColumnContext(
         @JsonProperty(required = false) LocalDateTime lastChangedDate,
         @JsonProperty(required = false) Boolean isSensitive,
         @JsonProperty(required = false) Boolean isUnique,
-        @JsonProperty(required = false) ValidRegexPatterns validationRegex
+        @JsonProperty(required = false) ValidRegexPatterns validationRegex,
+        @JsonProperty(required = false) Boolean isRestricted
 ) {}

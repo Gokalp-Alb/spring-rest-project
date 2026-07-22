@@ -20,7 +20,7 @@ public class KafkaMappingInitializer implements CommandLineRunner {
 
     @Override
     public void run(String @NonNull ... args) {
-        String query = "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'kafka_table_mappings')";
+        String query = "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sys_kafka_table_mappings')";
         Boolean exists = jdbcTemplate.queryForObject(query, Boolean.class);
         
         if (!Boolean.TRUE.equals(exists)) {

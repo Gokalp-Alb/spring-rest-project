@@ -9,7 +9,6 @@ import com.springrest.springrestproject.dto.response.user.GroupResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.model.user.GroupName;
-import com.springrest.springrestproject.model.user.Role;
 import com.springrest.springrestproject.model.user.UserGroup;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -33,34 +32,18 @@ public class UserService implements IUserService {
     @Override
     @Transactional
     public UserRequest createUser(AppUser user, Long userId) {
-        if (user.role() == null || user.role().equals(Role.MCP_AGENT)) {
-            throw new ApplicationException(
-                    ErrorCode.BAD_REQUEST,
-                    List.of(new FieldValidationError("role", "Invalid user role")),
-                    "Invalid user role"
-            );
-        }
         AppUser userToSave = AppUser.builder()
                 .username(user.username())
                 .password(passwordEncoder.encode(user.password()))
-                .role(user.role())
                 .active(true)
                 .build();
         AppUser savedUser = userRepo.save(userToSave);
         userRepo.insertRegisteredUserGroup(savedUser.id(), userId);
         String simulatedSql = String.format(
-                "INSERT INTO app_user (id, username, role, active) VALUES (%d, '%s', '%s', true);",
-                savedUser.id(),
-                savedUser.username(),
-                savedUser.role().name()
-        );
-        metadataService.logSchemaChange("app_user", simulatedSql, userId);
-        return new UserRequest(
-                savedUser.id(),
-                savedUser.username(),
-                savedUser.role(),
-                "********"
-        );
+                "INSERT INTO sys_app_users (id, username, active) VALUES (%d, '%s', true);",
+                savedUser.id(), savedUser.username());
+        metadataService.logSchemaChange("sys_app_users", simulatedSql, userId);
+        return new UserRequest(savedUser.id(), savedUser.username(), groupNamesFor(savedUser.id()), "********");
     }
 
     @Override
@@ -77,7 +60,7 @@ public class UserService implements IUserService {
         return new UserRequest(
                 user.id(),
                 user.username(),
-                user.role(),
+                groupNamesFor(user.id()),
                 "********"
         );
     }
@@ -90,7 +73,7 @@ public class UserService implements IUserService {
         return new UserRequest(
                 user.id(),
                 user.username(),
-                user.role(),
+                groupNamesFor(user.id()),
                 "********"
         );
     }
@@ -98,14 +81,14 @@ public class UserService implements IUserService {
     @Override
     @Transactional(readOnly = true)
     public AppUser findByUsername(String username) {
-        return userRepo.findByUsername(username)
+        return userRepo.findByUsernameWithPassword(username)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, username));
     }
 
     @Override
     @Transactional
     public void deleteUserById(Long id, Long userId) {
-        AppUser user = userRepo.findById(id)
+        AppUser user = userRepo.findByIdWithPassword(id)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + id));
         if(!Boolean.TRUE.equals(user.active())){
             throw new ApplicationException(
@@ -117,19 +100,21 @@ public class UserService implements IUserService {
                 .id(user.id())
                 .username(user.username())
                 .password(user.password())
-                .role(user.role())
                 .active(false)
                 .build();
-        String simulatedSql = String.format("UPDATE app_users SET active = false WHERE id = %d;", id);
-        metadataService.logSchemaChange("app_users", simulatedSql, userId);
+        String simulatedSql = String.format("UPDATE sys_app_users SET active = false WHERE id = %d;", id);
+        metadataService.logSchemaChange("sys_app_users", simulatedSql, userId);
         userRepo.save(updatedUser);
     }
 
     @Override
     @Transactional
     public GroupResponse addGroupToUser(Long userId, GroupName groupName, Long executorId) {
-        userRepo.findById(userId)
+        AppUser target = userRepo.findById(userId)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + userId));
+        if ("mcp_agent".equals(target.username())) {
+            throw new ApplicationException(ErrorCode.SYSTEM_ACCOUNT_GROUPS_LOCKED);
+        }
         if (groupName == null) {
             throw new ApplicationException(
                     ErrorCode.INVALID_GROUP_NAME,
@@ -156,8 +141,9 @@ public class UserService implements IUserService {
     @Override
     @Transactional(readOnly = true)
     public List<GroupResponse> getGroupsForUser(Long userId) {
-        userRepo.findById(userId)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + userId));
+        if (!userRepo.existsByUserId(userId)) {
+            throw new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + userId);
+        }
         return userRepo.findGroupsByUserId(userId).stream()
                 .map(this::toGroupResponse)
                 .toList();
@@ -166,6 +152,11 @@ public class UserService implements IUserService {
     @Override
     @Transactional
     public void removeGroupById(Long userId, Long groupId, Long executorId) {
+        AppUser target = userRepo.findById(userId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + userId));
+        if ("mcp_agent".equals(target.username())) {
+            throw new ApplicationException(ErrorCode.SYSTEM_ACCOUNT_GROUPS_LOCKED);
+        }
         UserGroup group = userRepo.findGroupById(groupId)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.GROUP_NOT_FOUND, "ID: " + groupId));
         if (!group.userId().equals(userId)) {
@@ -183,6 +174,11 @@ public class UserService implements IUserService {
     @Override
     @Transactional
     public void removeGroupByName(Long userId, String groupNameRaw, Long executorId) {
+        AppUser target = userRepo.findById(userId)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.USER_NOT_FOUND, "ID: " + userId));
+        if ("mcp_agent".equals(target.username())) {
+            throw new ApplicationException(ErrorCode.SYSTEM_ACCOUNT_GROUPS_LOCKED);
+        }
         GroupName groupName;
         try {
             groupName = GroupName.valueOf(groupNameRaw.toUpperCase());
@@ -202,5 +198,11 @@ public class UserService implements IUserService {
 
     private GroupResponse toGroupResponse(UserGroup group) {
         return new GroupResponse(group.id(), group.userId(), group.groupName(), group.createdDate());
+    }
+
+    private List<GroupName> groupNamesFor(Long userId) {
+        return userRepo.findGroupsByUserId(userId).stream()
+                .map(UserGroup::groupName)
+                .toList();
     }
 }

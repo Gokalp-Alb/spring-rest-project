@@ -4,7 +4,8 @@ public record SystemColumn(
         ColumnDefinition creatorId,
         ColumnDefinition createdDate,
         ColumnDefinition lastUpdaterId,
-        ColumnDefinition lastChangedDate
+        ColumnDefinition lastChangedDate,
+        ColumnDefinition isRestricted
 ) {
     public record ColumnDefinition(String name, String type) {}
 
@@ -13,7 +14,8 @@ public record SystemColumn(
                 new ColumnDefinition("creator_id", "BIGINT"),
                 new ColumnDefinition("created_date", "TIMESTAMP"),
                 new ColumnDefinition("last_updater_id", "BIGINT"),
-                new ColumnDefinition("last_changed_date", "TIMESTAMP")
+                new ColumnDefinition("last_changed_date", "TIMESTAMP"),
+                new ColumnDefinition("is_restricted", "BOOLEAN DEFAULT FALSE")
         );
     }
 }

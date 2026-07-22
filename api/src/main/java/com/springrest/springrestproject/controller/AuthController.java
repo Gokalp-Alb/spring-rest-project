@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Date;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -33,6 +34,7 @@ public class AuthController {
     private final UserService userService;
     private final PasswordEncoder passwordEncoder;
     private final IPersonalAccessTokenService patService;
+    private final com.springrest.springrestproject.repository.AppUserRepo appUserRepo;
 
     @Value("${app.jwt.secret}")
     private String tokenSecret;
@@ -40,21 +42,23 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<String>> login(@RequestBody LoginRequest loginRequest) throws Exception {
         AppUser user = userService.findByUsername(loginRequest.username());
-        if (user.role() == com.springrest.springrestproject.model.user.Role.MCP_AGENT) {
+        if (appUserRepo.existsByUserIdAndGroupName(user.id(), com.springrest.springrestproject.model.user.GroupName.MCP_AGENT)) {
             throw new ApplicationException(ErrorCode.INVALID_CREDENTIALS);
         }
         if (!passwordEncoder.matches(loginRequest.password(), user.password())) {
             throw new ApplicationException(ErrorCode.INVALID_CREDENTIALS);
         }
+        List<String> roleClaims = appUserRepo.findGroupsByUserId(user.id()).stream()
+                .map(g -> "ROLE_" + g.groupName().name())
+                .toList();
         JWTClaimsSet claimsSet = new JWTClaimsSet.Builder()
                 .subject(user.username())
                 .issuer("com.springrest.project")
                 .issueTime(new Date())
-                .expirationTime(new Date(new Date().getTime() + 86400000)) // 24 hours lifetime
+                .expirationTime(new Date(new Date().getTime() + 86400000))
                 .claim("userId", user.id())
-                .claim("roles", "ROLE_" + user.role().name())
+                .claim("roles", roleClaims)
                 .build();
-
         JWSSigner signer = new MACSigner(tokenSecret.getBytes());
         SignedJWT signedJWT = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claimsSet);
         signedJWT.sign(signer);

@@ -2,6 +2,7 @@ package com.springrest.springrestproject.service.implementations;
 
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.core.governance.SystemGovernanceGuard;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
 import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
@@ -51,11 +52,13 @@ public class MetadataService implements IMetadataService {
     private final RelationCacheService relationCacheService;
     private final IRelationService relationService;
     private final SqlIdentifierValidator sqlIdentifierValidator;
+    private final SystemGovernanceGuard governanceGuard;
 
     @Override
     @Transactional
     public TableMetadata createTable(String tableName, TableCreateRequest request, Long userId) {
         sqlIdentifierValidator.validate(tableName);
+        governanceGuard.assertNotReservedTableName(tableName);
         if (tableName.toLowerCase().endsWith("_log")) {
             throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
         }
@@ -102,7 +105,7 @@ public class MetadataService implements IMetadataService {
             jdbcTemplate.execute(createLogTableSql);
         }
 
-        TableContext tableContext = new TableContext(userId, LocalDateTime.now(), userId, LocalDateTime.now());
+        TableContext tableContext = new TableContext(userId, LocalDateTime.now(), userId, LocalDateTime.now(), false);
 
         List<ColumnMetadata> domainColumns = augmentedColumns.stream().map(srcCol -> {
             ColumnContext srcCtx = srcCol.columnContext();
@@ -158,6 +161,7 @@ public class MetadataService implements IMetadataService {
     @Transactional
     public TableResponse deleteTableByName(String tableName, Long userId) {
         sqlIdentifierValidator.validate(tableName);
+        governanceGuard.assertNotSystemTable(tableName);
         if (tableName.toLowerCase().endsWith("_log")) {
             throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
         }
@@ -295,7 +299,13 @@ public class MetadataService implements IMetadataService {
                 .columnContext(defaultCtx)
                 .build();
 
-        return List.of(c1, c2, c3, c4);
+        ColumnMetadata c5 = ColumnMetadata.builder()
+                .columnName(sysCols.isRestricted().name())
+                .dataType(sysCols.isRestricted().type())
+                .columnContext(defaultCtx)
+                .build();
+
+        return List.of(c1, c2, c3, c4, c5);
     }
 
 

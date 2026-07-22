@@ -46,4 +46,15 @@ public class TableMetadataCacheService {
             log.warn("Redis unavailable, skipping cache eviction for {}", tableName);
         }
     }
+
+    public void evictAll() {
+        try {
+            var keys = redisTemplate.keys("table-metadata:*");
+            if (keys != null && !keys.isEmpty()) {
+                redisTemplate.delete(keys);
+            }
+        } catch (RedisConnectionFailureException e) {
+            log.warn("Redis unavailable, skipping full cache eviction");
+        }
+    }
 }

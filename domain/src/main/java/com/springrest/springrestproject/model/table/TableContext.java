@@ -6,5 +6,6 @@ public record TableContext(
     Long creatorId,
     LocalDateTime createdDate,
     Long lastUpdaterId,
-    LocalDateTime lastChangedDate
+    LocalDateTime lastChangedDate,
+    Boolean isRestricted
 ) {}

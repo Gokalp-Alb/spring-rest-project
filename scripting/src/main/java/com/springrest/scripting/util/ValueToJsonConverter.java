@@ -17,7 +17,11 @@ public class ValueToJsonConverter {
         try {
             Set<Value> visited = Collections.newSetFromMap(new IdentityHashMap<>());
             Object hostObject = toHostObject(value, visited);
-            if (hostObject instanceof Number || hostObject instanceof Boolean) {
+            // Adding if checks to NOT JSON wrap basic objects. Introduces readability at the cost of
+            // ambiguity as raw strings are shown without quotes while strings in objects are written in quotes.
+            // With the current implementation it is unable to distinguish between a string 5 and a number 5.
+            // Depending on what is aimed for (human/machine readability) may change this part
+            if (hostObject instanceof Number || hostObject instanceof Boolean || hostObject instanceof String) {
                 return String.valueOf(hostObject);
             }
             return objectMapper.writeValueAsString(hostObject);

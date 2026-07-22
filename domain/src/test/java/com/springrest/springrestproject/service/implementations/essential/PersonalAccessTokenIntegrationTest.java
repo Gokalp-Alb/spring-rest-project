@@ -4,7 +4,6 @@ import com.springrest.springrestproject.BaseIntegrationTest;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.model.user.AppUser;
-import com.springrest.springrestproject.model.user.Role;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,11 +34,10 @@ class PersonalAccessTokenIntegrationTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("DELETE FROM app_users WHERE username = 'pat_test_user'");
+        jdbcTemplate.execute("DELETE FROM sys_app_users WHERE username = 'pat_test_user'");
         AppUser user = AppUser.builder()
                 .username("pat_test_user")
                 .password(passwordEncoder.encode("password123"))
-                .role(Role.USER)
                 .active(true)
                 .build();
         testUser = appUserRepo.save(user);

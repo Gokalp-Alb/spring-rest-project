@@ -44,4 +44,15 @@ public class RelationCacheService {
         }
     }
 
+    public void evictAll() {
+        try {
+            var keys = redisTemplate.keys("relations:*");
+            if (keys != null && !keys.isEmpty()) {
+                redisTemplate.delete(keys);
+            }
+        } catch (RedisConnectionFailureException e) {
+            log.warn("Redis unavailable, skipping full cache eviction");
+        }
+    }
+
 }

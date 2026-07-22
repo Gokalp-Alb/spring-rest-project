@@ -20,7 +20,7 @@ import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.model.user.AppUser;
-import com.springrest.springrestproject.model.user.Role;
+import com.springrest.springrestproject.model.user.GroupName;
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -73,14 +73,14 @@ public class McpTools {
             if (requireWrite) {
                 throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Personal Access Token (PAT) is required for write/CRUD operations.");
             }
-            return 2L; // Fallback to guest read-only agent ID
+            return 1L; // Fallback to guest read-only agent ID
         }
         return patService.validateTokenAndGetUserId(mcpPat);
     }
 
     private void verifyAdminRole(Long userId) {
         UserRequest executor = userService.getUserById(userId);
-        if (executor.role() != Role.ADMIN) {
+        if (!executor.groups().contains(GroupName.ADMIN)) {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Only ADMIN users are authorized to perform this operation.");
         }
     }
@@ -93,6 +93,12 @@ public class McpTools {
     public String resetSandboxDatabaseToDefault(String confirm) {
         Long userId = resolveActiveUserId(true);
         return databaseManagementService.resetDatabaseToDefault(confirm, userId);
+    }
+
+    @McpTool(description = "Evict all cached table metadata and relations (e.g. after a direct DB write to sys_table_metadata/sys_column_metadata/sys_relation_metadata bypasses the normal cache-evicting write path). Requires ADMIN role and a valid PAT.")
+    public String evictAllCache() {
+        Long userId = resolveActiveUserId(true);
+        return databaseManagementService.evictAllCache(userId);
     }
 
     // ==========================================
@@ -262,7 +268,8 @@ public class McpTools {
     public AppUser findByUsername(String username) {
         Long userId = resolveActiveUserId(true);
         verifyAdminRole(userId);
-        return userService.findByUsername(username);
+        AppUser user = userService.findByUsername(username);
+        return AppUser.builder().id(user.id()).username(user.username()).active(user.active()).build();
     }
 
     @McpTool(description = "Create a new user. Note: Strict schema requires passing a dummy 'id' (e.g. 0), which will be auto-generated. Requires ADMIN role and a valid PAT.")

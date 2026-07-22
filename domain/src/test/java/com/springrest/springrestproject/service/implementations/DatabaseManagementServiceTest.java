@@ -2,7 +2,6 @@ package com.springrest.springrestproject.service.implementations;
 
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
-import com.springrest.springrestproject.model.user.Role;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +9,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,8 +38,8 @@ public class DatabaseManagementServiceTest {
 
     @Test
     void testResetDatabase_NotAdmin() {
-        when(userService.getUserById(1L)).thenReturn(new com.springrest.springrestproject.dto.request.user.UserRequest(1L, "user", Role.USER, "password"));
-        
+        when(userService.getUserById(1L)).thenReturn(new com.springrest.springrestproject.dto.request.user.UserRequest(1L, "user", List.of(), "password"));
+
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
                 databaseManagementService.resetDatabaseToDefault("yes-reset-sandbox", 1L));
         assertEquals(ErrorCode.UNAUTHORIZED_ACCESS, ex.getErrorCode());

@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Objects;
 
-import static jooq.generated.Tables.SYSTEM_DDL_LOG;
+import static jooq.generated.Tables.SYS_DDL_LOG;
 
 @Repository
 @RequiredArgsConstructor
@@ -18,14 +18,14 @@ public class SystemDdlLogRepo{
     @Transactional
     public SystemDdlLog save(SystemDdlLog log) {
         if (log.id() == null) {
-            Long generatedId = Objects.requireNonNull(dsl.insertInto(SYSTEM_DDL_LOG)
-                            .set(SYSTEM_DDL_LOG.TABLE_NAME, log.tableName())
-                            .set(SYSTEM_DDL_LOG.EXECUTED_SQL, log.executedSql())
-                            .set(SYSTEM_DDL_LOG.USER_ID, log.userId())
-                            .set(SYSTEM_DDL_LOG.EXECUTED_AT, log.executedAt())
-                            .returning(SYSTEM_DDL_LOG.ID)
+            Long generatedId = Objects.requireNonNull(dsl.insertInto(SYS_DDL_LOG)
+                            .set(SYS_DDL_LOG.TABLE_NAME, log.tableName())
+                            .set(SYS_DDL_LOG.EXECUTED_SQL, log.executedSql())
+                            .set(SYS_DDL_LOG.USER_ID, log.userId())
+                            .set(SYS_DDL_LOG.EXECUTED_AT, log.executedAt())
+                            .returning(SYS_DDL_LOG.ID)
                             .fetchOne())
-                            .getValue(SYSTEM_DDL_LOG.ID);
+                            .getValue(SYS_DDL_LOG.ID);
             return SystemDdlLog.builder()
                     .id(generatedId)
                     .tableName(log.tableName())
@@ -34,12 +34,12 @@ public class SystemDdlLogRepo{
                     .executedAt(log.executedAt())
                     .build();
         } else {
-            dsl.update(SYSTEM_DDL_LOG)
-                    .set(SYSTEM_DDL_LOG.TABLE_NAME, log.tableName())
-                    .set(SYSTEM_DDL_LOG.EXECUTED_SQL, log.executedSql())
-                    .set(SYSTEM_DDL_LOG.USER_ID, log.userId())
-                    .set(SYSTEM_DDL_LOG.EXECUTED_AT, log.executedAt())
-                    .where(SYSTEM_DDL_LOG.ID.eq(log.id()))
+            dsl.update(SYS_DDL_LOG)
+                    .set(SYS_DDL_LOG.TABLE_NAME, log.tableName())
+                    .set(SYS_DDL_LOG.EXECUTED_SQL, log.executedSql())
+                    .set(SYS_DDL_LOG.USER_ID, log.userId())
+                    .set(SYS_DDL_LOG.EXECUTED_AT, log.executedAt())
+                    .where(SYS_DDL_LOG.ID.eq(log.id()))
                     .execute();
             return log;
         }

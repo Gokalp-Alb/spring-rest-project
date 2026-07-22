@@ -3,6 +3,7 @@ package com.springrest.springrestproject.service.implementations;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
+import com.springrest.springrestproject.core.governance.SystemGovernanceGuard;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyInsertRequest;
 import com.springrest.springrestproject.dto.request.relation.ManyToManyRelationRequest;
@@ -39,6 +40,7 @@ public class RelationService implements IRelationService {
     private final JdbcTemplate jdbcTemplate;
     private final ColumnRelationValidator columnRelationValidator;
     private final SqlIdentifierValidator sqlIdentifierValidator;
+    private final SystemGovernanceGuard governanceGuard;
 
     @Override
     @Transactional
@@ -57,6 +59,9 @@ public class RelationService implements IRelationService {
     }
 
     private RelationResponse createDirectRelation(DirectRelationRequest request, RelationType relationType, Long userId) {
+        governanceGuard.assertNotSystemTable(request.tableName());
+        governanceGuard.assertNotSystemTable(request.relatedTable());
+
         TableMetadata sourceTable = tableMetadataRepo.findByTableName(request.tableName())
                 .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.tableName()));
 
@@ -149,6 +154,9 @@ public class RelationService implements IRelationService {
     public RelationResponse createManyToManyRelation(ManyToManyRelationRequest request, Long userId) {
         sqlIdentifierValidator.validate(request.tableName());
         sqlIdentifierValidator.validate(request.relatedTable());
+        governanceGuard.assertNotSystemTable(request.tableName());
+        governanceGuard.assertNotSystemTable(request.relatedTable());
+
         tableMetadataRepo.findByTableName(request.tableName())
                 .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.tableName()));
         tableMetadataRepo.findByTableName(request.relatedTable())

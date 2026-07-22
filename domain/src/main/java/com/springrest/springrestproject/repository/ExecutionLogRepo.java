@@ -2,7 +2,7 @@ package com.springrest.springrestproject.repository;
 
 import com.springrest.springrestproject.core.model.scripting.ExecutionStatus;
 import com.springrest.springrestproject.model.ExecutionLog;
-import jooq.generated.tables.records.ExecutionLogsRecord;
+import jooq.generated.tables.records.SysExecutionLogsRecord;
 import lombok.RequiredArgsConstructor;
 import org.jooq.DSLContext;
 import org.springframework.stereotype.Repository;
@@ -11,7 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Objects;
 import java.util.Optional;
 
-import static jooq.generated.Tables.EXECUTION_LOGS;
+import static jooq.generated.Tables.SYS_EXECUTION_LOGS;
 
 @Repository
 @RequiredArgsConstructor
@@ -20,8 +20,8 @@ public class ExecutionLogRepo {
 
     @Transactional(readOnly = true)
     public Optional<ExecutionLog> findByExecutionId(String executionId) {
-        return dsl.selectFrom(EXECUTION_LOGS)
-                .where(EXECUTION_LOGS.EXECUTION_ID.eq(executionId))
+        return dsl.selectFrom(SYS_EXECUTION_LOGS)
+                .where(SYS_EXECUTION_LOGS.EXECUTION_ID.eq(executionId))
                 .fetchOptional()
                 .map(this::toExecutionLog);
     }
@@ -29,19 +29,19 @@ public class ExecutionLogRepo {
     @Transactional
     public ExecutionLog save(ExecutionLog log) {
         if (log.id() == null) {
-            Long generatedId = Objects.requireNonNull(dsl.insertInto(EXECUTION_LOGS)
-                            .set(EXECUTION_LOGS.EXECUTION_ID, log.executionId())
-                            .set(EXECUTION_LOGS.SCRIPT, log.script())
-                            .set(EXECUTION_LOGS.CALLER, log.caller())
-                            .set(EXECUTION_LOGS.STATUS, log.status().name())
-                            .set(EXECUTION_LOGS.OUTPUT, log.output())
-                            .set(EXECUTION_LOGS.DURATION_MS, log.durationMs())
-                            .set(EXECUTION_LOGS.ERROR_MESSAGE, log.errorMessage())
-                            .set(EXECUTION_LOGS.CREATED_AT, log.createdAt())
-                            .set(EXECUTION_LOGS.FINISHED_AT, log.finishedAt())
-                            .returning(EXECUTION_LOGS.ID)
+            Long generatedId = Objects.requireNonNull(dsl.insertInto(SYS_EXECUTION_LOGS)
+                            .set(SYS_EXECUTION_LOGS.EXECUTION_ID, log.executionId())
+                            .set(SYS_EXECUTION_LOGS.SCRIPT, log.script())
+                            .set(SYS_EXECUTION_LOGS.CALLER, log.caller())
+                            .set(SYS_EXECUTION_LOGS.STATUS, log.status().name())
+                            .set(SYS_EXECUTION_LOGS.OUTPUT, log.output())
+                            .set(SYS_EXECUTION_LOGS.DURATION_MS, log.durationMs())
+                            .set(SYS_EXECUTION_LOGS.ERROR_MESSAGE, log.errorMessage())
+                            .set(SYS_EXECUTION_LOGS.CREATED_AT, log.createdAt())
+                            .set(SYS_EXECUTION_LOGS.FINISHED_AT, log.finishedAt())
+                            .returning(SYS_EXECUTION_LOGS.ID)
                             .fetchOne())
-                    .getValue(EXECUTION_LOGS.ID);
+                    .getValue(SYS_EXECUTION_LOGS.ID);
 
             return ExecutionLog.builder()
                     .id(generatedId)
@@ -56,23 +56,23 @@ public class ExecutionLogRepo {
                     .finishedAt(log.finishedAt())
                     .build();
         } else {
-            dsl.update(EXECUTION_LOGS)
-                    .set(EXECUTION_LOGS.EXECUTION_ID, log.executionId())
-                    .set(EXECUTION_LOGS.SCRIPT, log.script())
-                    .set(EXECUTION_LOGS.CALLER, log.caller())
-                    .set(EXECUTION_LOGS.STATUS, log.status().name())
-                    .set(EXECUTION_LOGS.OUTPUT, log.output())
-                    .set(EXECUTION_LOGS.DURATION_MS, log.durationMs())
-                    .set(EXECUTION_LOGS.ERROR_MESSAGE, log.errorMessage())
-                    .set(EXECUTION_LOGS.CREATED_AT, log.createdAt())
-                    .set(EXECUTION_LOGS.FINISHED_AT, log.finishedAt())
-                    .where(EXECUTION_LOGS.ID.eq(log.id()))
+            dsl.update(SYS_EXECUTION_LOGS)
+                    .set(SYS_EXECUTION_LOGS.EXECUTION_ID, log.executionId())
+                    .set(SYS_EXECUTION_LOGS.SCRIPT, log.script())
+                    .set(SYS_EXECUTION_LOGS.CALLER, log.caller())
+                    .set(SYS_EXECUTION_LOGS.STATUS, log.status().name())
+                    .set(SYS_EXECUTION_LOGS.OUTPUT, log.output())
+                    .set(SYS_EXECUTION_LOGS.DURATION_MS, log.durationMs())
+                    .set(SYS_EXECUTION_LOGS.ERROR_MESSAGE, log.errorMessage())
+                    .set(SYS_EXECUTION_LOGS.CREATED_AT, log.createdAt())
+                    .set(SYS_EXECUTION_LOGS.FINISHED_AT, log.finishedAt())
+                    .where(SYS_EXECUTION_LOGS.ID.eq(log.id()))
                     .execute();
             return log;
         }
     }
 
-    private ExecutionLog toExecutionLog(ExecutionLogsRecord record) {
+    private ExecutionLog toExecutionLog(SysExecutionLogsRecord record) {
         return ExecutionLog.builder()
                 .id(record.getId())
                 .executionId(record.getExecutionId())

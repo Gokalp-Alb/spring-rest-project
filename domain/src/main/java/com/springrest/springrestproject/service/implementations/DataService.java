@@ -3,6 +3,7 @@ package com.springrest.springrestproject.service.implementations;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
+import com.springrest.springrestproject.core.governance.SystemGovernanceGuard;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.ALLOWED_OPERATORS;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
@@ -37,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -54,11 +56,16 @@ public class DataService implements IDataService {
     private final DataEvaluationHelper dataHelper;
     private final OutboundKafkaPublisher kafkaPublisher;
     private final SqlIdentifierValidator sqlIdentifierValidator;
+    private final SystemGovernanceGuard governanceGuard;
 
     @Override
     @Transactional
     public DataResponse insertRow(TableInsertRequest request, Long userId) {
         sqlIdentifierValidator.validate(request.tableName());
+        governanceGuard.assertNotSystemTable(request.tableName());
+        if (request.rowData() != null) {
+            governanceGuard.assertNoRestrictedColumnWrite(request.rowData().keySet());
+        }
         if (request.rowData() != null) {
             for (String key : request.rowData().keySet()) {
                 if (!"relations".equals(key)) {
@@ -238,19 +245,18 @@ public class DataService implements IDataService {
         if (getRelationDepth(request) > 3) {
             throw new ApplicationException(ErrorCode.BAD_REQUEST, "Relation depth exceeds the maximum cap of 3 levels");
         }
-        if (userId != null && userId != 0L) {
-            userRepo.findById(userId)
-                    .orElseThrow(() -> new ApplicationException(
-                            ErrorCode.USER_CONTEXT_INVALID,
-                            List.of(new FieldValidationError("userId", "Executing user does not exist")),
-                            userId
-                    ));
+        if (userId != null && userId != 0L && !userRepo.existsByUserId(userId)) {
+            throw new ApplicationException(
+                    ErrorCode.USER_CONTEXT_INVALID,
+                    List.of(new FieldValidationError("userId", "Executing user does not exist")),
+                    userId
+            );
         }
-        tableMetadataRepo.findByTableName(request.tableName())
+        TableMetadata metadata = tableMetadataRepo.findByTableName(request.tableName())
                 .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, request.tableName()));
         dataHelper.validateQueryDates(request);
 
-        List<Map<String, Object>> data = executeMainSelect(request, pageable);
+        List<Map<String, Object>> data = executeMainSelect(request, pageable, metadata);
 
         if (request.relations() != null && !request.relations().isEmpty() && !data.isEmpty()) {
             data = fetchAndAttachRelations(request.tableName(), request.relations(), data);
@@ -264,8 +270,8 @@ public class DataService implements IDataService {
         return new QueryResponse(data, auditData);
     }
 
-    private List<Map<String, Object>> executeMainSelect(QueryRequest request, Pageable pageable) {
-        String fieldsStr = buildFieldsString(request.fields(), request.relations(), relationService.getRelationsForTable(request.tableName()), "T");
+    private List<Map<String, Object>> executeMainSelect(QueryRequest request, Pageable pageable, TableMetadata metadata) {
+        String fieldsStr = buildFieldsString(request.fields(), request.relations(), relationService.getRelationsForTable(request.tableName()), "T", metadata);
 
         String distinctStr = (request.relations() != null && !request.relations().isEmpty()) ? "DISTINCT " : "";
         StringBuilder sqlBuilder = new StringBuilder(String.format("SELECT %s%s FROM %s T", distinctStr, fieldsStr, request.tableName()));
@@ -299,16 +305,32 @@ public class DataService implements IDataService {
         return jdbcTemplate.queryForList(sqlBuilder.toString(), queryParams.toArray());
     }
 
-    private String buildFieldsString(List<String> requestedFields, Map<String, QueryRequest> relations, List<ResolvedRelation> resolvedRelations, String alias) {
-        if (requestedFields == null || requestedFields.isEmpty()) {
-            return alias + ".*";
+    private Set<String> sensitiveColumnsFor(TableMetadata metadata) {
+        if (metadata == null || metadata.columns() == null) {
+            return Set.of();
         }
-        
-        List<String> fields = new ArrayList<>(requestedFields);
+        return metadata.columns().stream()
+                .filter(col -> col.columnContext() != null && Boolean.TRUE.equals(col.columnContext().isSensitive()))
+                .map(col -> col.columnName().toLowerCase())
+                .collect(Collectors.toSet());
+    }
+
+    private String buildFieldsString(List<String> requestedFields, Map<String, QueryRequest> relations, List<ResolvedRelation> resolvedRelations, String alias, TableMetadata metadata) {
+        Set<String> sensitiveColumns = sensitiveColumnsFor(metadata);
+
+        List<String> fields;
+        if (requestedFields == null || requestedFields.isEmpty()) {
+            if (sensitiveColumns.isEmpty() || metadata == null || metadata.columns() == null) {
+                return alias + ".*";
+            }
+            fields = metadata.columns().stream().map(ColumnMetadata::columnName).collect(Collectors.toCollection(ArrayList::new));
+        } else {
+            fields = new ArrayList<>(requestedFields);
+        }
         if (!fields.contains("id")) {
             fields.add("id");
         }
-        
+
         if (relations != null && resolvedRelations != null) {
             for (String relName : relations.keySet()) {
                 resolvedRelations.stream()
@@ -321,10 +343,24 @@ public class DataService implements IDataService {
                         });
             }
         }
-        
+
         return fields.stream()
-                .map(field -> alias + "." + field)
+                .map(field -> sensitiveColumns.contains(field.toLowerCase())
+                        ? "'********' AS " + field
+                        : alias + "." + field)
                 .collect(Collectors.joining(", "));
+    }
+
+    private ResolvedRelation resolveRelationOrThrow(List<ResolvedRelation> resolvedRelations, String relName, String tableName) {
+        return resolvedRelations.stream()
+                .filter(r -> r.relationName().equalsIgnoreCase(relName))
+                .findFirst()
+                .orElseThrow(() -> new ApplicationException(
+                        ErrorCode.RELATION_NOT_FOUND,
+                        List.of(new FieldValidationError("relations", "Relation '" + relName + "' does not exist on table '" + tableName + "'")),
+                        relName,
+                        tableName
+                ));
     }
 
     private void buildJoinsAndConditions(String parentAlias, String tableName, Map<String, QueryRequest> relations, StringBuilder joinSql, StringBuilder whereSql, List<Object> whereParams, AtomicInteger aliasCounter) {
@@ -333,16 +369,8 @@ public class DataService implements IDataService {
         for (Map.Entry<String, QueryRequest> entry : relations.entrySet()) {
             String relName = entry.getKey();
             QueryRequest relQuery = entry.getValue();
-            
-            ResolvedRelation match = resolvedRelations.stream()
-                    .filter(r -> r.relationName().equalsIgnoreCase(relName))
-                    .findFirst()
-                    .orElseThrow(() -> new ApplicationException(
-                            ErrorCode.RELATION_NOT_FOUND,
-                            List.of(new FieldValidationError("relations", "Relation '" + relName + "' does not exist on table '" + tableName + "'")),
-                            relName,
-                            tableName
-                    ));
+
+            ResolvedRelation match = resolveRelationOrThrow(resolvedRelations, relName, tableName);
 
             String currentAlias = "B" + aliasCounter.getAndIncrement();
             if (RelationJoinType.M2M == match.type()) {
@@ -565,11 +593,8 @@ public class DataService implements IDataService {
     @Transactional
     public DataResponse deleteRowById(String tableName, Long id, Long userId) {
         sqlIdentifierValidator.validate(tableName);
-        if (tableName.toLowerCase().endsWith("_log")) {
-            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
-        }
-        TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
+        governanceGuard.assertNotSystemTable(tableName);
+        TableMetadata metadata = logAndRestrictedCheck(tableName, id);
         String deleteSql = String.format("DELETE FROM %s WHERE id = ?;", tableName);
 
         List<Object> logValues = new ArrayList<>();
@@ -614,16 +639,16 @@ public class DataService implements IDataService {
     @Transactional
     public DataResponse updateRowById(String tableName, Long id, Map<String, Object> updateData, Long userId) {
         sqlIdentifierValidator.validate(tableName);
+        governanceGuard.assertNotSystemTable(tableName);
+        if (updateData != null) {
+            governanceGuard.assertNoRestrictedColumnWrite(updateData.keySet());
+        }
         if (updateData != null) {
             for (String key : updateData.keySet()) {
                 sqlIdentifierValidator.validate(key);
             }
         }
-        if (tableName.toLowerCase().endsWith("_log")) {
-            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
-        }
-        TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
-                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
+        TableMetadata metadata = logAndRestrictedCheck(tableName, id);
         if (updateData == null || updateData.isEmpty()) {
             throw new ApplicationException(
                     ErrorCode.EMPTY_UPDATE_PAYLOAD,
@@ -689,6 +714,18 @@ public class DataService implements IDataService {
                 "UPDATE",
                 finalUpdateData
         );
+    }
+
+    private TableMetadata logAndRestrictedCheck(String tableName, Long id) {
+        if (tableName.toLowerCase().endsWith("_log")) {
+            throw new ApplicationException(ErrorCode.SYSTEM_LOG_MUTATION_DENIED);
+        }
+        TableMetadata metadata = tableMetadataRepo.findByTableName(tableName)
+                .orElseThrow(() -> new ApplicationException(ErrorCode.TABLE_NOT_FOUND, tableName));
+        Boolean currentRestricted = jdbcTemplate.queryForObject(
+                String.format("SELECT is_restricted FROM %s WHERE id = ?", tableName), Boolean.class, id);
+        governanceGuard.assertRowMutable(Boolean.TRUE.equals(currentRestricted));
+        return metadata;
     }
 
     @Override
@@ -794,15 +831,7 @@ public class DataService implements IDataService {
             String relName = entry.getKey();
             QueryRequest relQuery = entry.getValue();
 
-            ResolvedRelation match = resolvedRelations.stream()
-                    .filter(r -> r.relationName().equalsIgnoreCase(relName))
-                    .findFirst()
-                    .orElseThrow(() -> new ApplicationException(
-                            ErrorCode.RELATION_NOT_FOUND,
-                            List.of(new FieldValidationError("relations", "Relation '" + relName + "' does not exist on table '" + tableName + "'")),
-                            relName,
-                            tableName
-                    ));
+            ResolvedRelation match = resolveRelationOrThrow(resolvedRelations, relName, tableName);
 
             List<Map<String, Object>> relatedRows;
             String targetTable = match.targetTable();
@@ -810,7 +839,8 @@ public class DataService implements IDataService {
             StringBuilder sqlBuilder = new StringBuilder();
             List<Object> queryParams = new ArrayList<>();
             
-            String fieldsStr = buildFieldsString(relQuery.fields(), relQuery.relations(), relationService.getRelationsForTable(targetTable), "B");
+            TableMetadata targetMetadata = tableMetadataRepo.findByTableName(targetTable).orElse(null);
+            String fieldsStr = buildFieldsString(relQuery.fields(), relQuery.relations(), relationService.getRelationsForTable(targetTable), "B", targetMetadata);
 
             boolean shouldPaginate = relQuery.page() != null && relQuery.size() != null && RelationJoinType.FORWARD != match.type();
             String orderBy = buildSortString(relQuery.sorts());

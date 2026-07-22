@@ -90,9 +90,15 @@ public class TableRelationshipIntegrationTest extends BaseIntegrationTest {
         try { jdbcTemplate.execute("DROP TABLE IF EXISTS " + studentTable + " CASCADE;"); } catch (Exception ignored) {}
         try { jdbcTemplate.execute("DROP TABLE IF EXISTS " + regexTable + " CASCADE;"); } catch (Exception ignored) {}
 
-        try { jdbcTemplate.execute("TRUNCATE TABLE relation_metadata CASCADE;"); } catch (Exception ignored) {}
-        try { jdbcTemplate.execute("TRUNCATE TABLE column_metadata CASCADE;"); } catch (Exception ignored) {}
-        try { jdbcTemplate.execute("TRUNCATE TABLE table_metadata CASCADE;"); } catch (Exception ignored) {}
+        // Scoped to this test's own dynamic tables only - sys_table_metadata/sys_relation_metadata now also
+        // hold the seeded registry rows for every sys_ system table, so a blanket TRUNCATE would wipe those too.
+        List<String> ownTables = List.of(parentTable, childTable, courseTable, studentTable, regexTable, "course_student_jt");
+        try {
+            jdbcTemplate.execute("DELETE FROM sys_relation_metadata WHERE source_table IN ('" + String.join("','", ownTables) + "') OR target_table IN ('" + String.join("','", ownTables) + "')");
+        } catch (Exception ignored) {}
+        try {
+            jdbcTemplate.execute("DELETE FROM sys_table_metadata WHERE table_name IN ('" + String.join("','", ownTables) + "')");
+        } catch (Exception ignored) {}
 
         tableMetadataCacheService.evict(childTable);
         tableMetadataCacheService.evict(parentTable);

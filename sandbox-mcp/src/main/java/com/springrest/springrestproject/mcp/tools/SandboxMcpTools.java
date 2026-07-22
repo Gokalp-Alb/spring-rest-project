@@ -122,6 +122,12 @@ public class SandboxMcpTools {
         return databaseManagementService.resetDatabaseToDefault(confirm, userId);
     }
 
+    @McpTool(description = "Evict all cached table metadata and relations (e.g. after a direct DB write to sys_table_metadata/sys_column_metadata/sys_relation_metadata bypasses the normal cache-evicting write path). Requires ADMIN role and a valid PAT.")
+    public String evictAllCache() {
+        Long userId = resolveActiveUserId(true);
+        return databaseManagementService.evictAllCache(userId);
+    }
+
     @McpTool(description = "Copy the schema and data from the live database into the sandbox database. Requires confirm='yes-overwrite-sandbox'")
     public String copyLiveDatabaseToSandbox(String confirm) throws Exception {
         if (!"yes-overwrite-sandbox".equals(confirm)) {
@@ -319,7 +325,8 @@ public class SandboxMcpTools {
 
     @McpTool(description = "Find a user entity by their username")
     public AppUser findByUsername(String username) {
-        return userService.findByUsername(username);
+        AppUser user = userService.findByUsername(username);
+        return AppUser.builder().id(user.id()).username(user.username()).active(user.active()).build();
     }
 
     @McpTool(description = "Create a new user. Note: Strict schema requires passing a dummy 'id' (e.g. 0), which will be auto-generated.")

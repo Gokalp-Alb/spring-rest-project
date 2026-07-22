@@ -32,8 +32,8 @@ class ExecutionLogServiceTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.execute("DELETE FROM execution_log_entries");
-        jdbcTemplate.execute("DELETE FROM execution_logs");
+        jdbcTemplate.execute("DELETE FROM sys_execution_log_entries");
+        jdbcTemplate.execute("DELETE FROM sys_execution_logs");
     }
 
     @Test

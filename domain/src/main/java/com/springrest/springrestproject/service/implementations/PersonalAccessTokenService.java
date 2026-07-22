@@ -4,7 +4,7 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.model.auth.PersonalAccessToken;
 import com.springrest.springrestproject.model.user.AppUser;
-import com.springrest.springrestproject.model.user.Role;
+import com.springrest.springrestproject.model.user.GroupName;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.repository.PersonalAccessTokenRepo;
 import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
@@ -27,10 +27,10 @@ public class PersonalAccessTokenService implements IPersonalAccessTokenService {
 
     @Override
     public String createToken(String username, String password, int expirationDays, String tokenName) {
-        AppUser user = appUserRepo.findByUsername(username)
+        AppUser user = appUserRepo.findByUsernameWithPassword(username)
                 .orElseThrow(() -> new ApplicationException(ErrorCode.INVALID_CREDENTIALS));
 
-        if (user.role() == Role.MCP_AGENT) {
+        if (appUserRepo.existsByUserIdAndGroupName(user.id(), GroupName.MCP_AGENT)) {
             throw new ApplicationException(ErrorCode.INVALID_CREDENTIALS);
         }
 

@@ -3,7 +3,9 @@ package com.springrest.springrestproject.service.implementations;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.dto.request.user.UserRequest;
-import com.springrest.springrestproject.model.user.Role;
+import com.springrest.springrestproject.model.user.GroupName;
+import com.springrest.springrestproject.service.implementations.redis.RelationCacheService;
+import com.springrest.springrestproject.service.implementations.redis.TableMetadataCacheService;
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,8 @@ public class DatabaseManagementService implements IDatabaseManagementService {
 
     private final IUserService userService;
     private final DataSource dataSource;
+    private final TableMetadataCacheService tableMetadataCacheService;
+    private final RelationCacheService relationCacheService;
 
     @Value("${spring.flyway.locations:classpath:db/migration}")
     private String flywayLocations;
@@ -34,7 +38,7 @@ public class DatabaseManagementService implements IDatabaseManagementService {
         }
 
         UserRequest executor = userService.getUserById(userId);
-        if (executor.role() != Role.ADMIN) {
+        if (!executor.groups().contains(GroupName.ADMIN)) {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Only ADMIN users are authorized to perform this operation.");
         }
 
@@ -48,5 +52,17 @@ public class DatabaseManagementService implements IDatabaseManagementService {
         flyway.clean();
         flyway.migrate();
         return "Database successfully reset to default Flyway state.";
+    }
+
+    @Override
+    public String evictAllCache(Long userId) {
+        UserRequest executor = userService.getUserById(userId);
+        if (!executor.groups().contains(GroupName.ADMIN)) {
+            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Only ADMIN users are authorized to perform this operation.");
+        }
+
+        tableMetadataCacheService.evictAll();
+        relationCacheService.evictAll();
+        return "All cached table metadata and relations evicted.";
     }
 }

@@ -10,7 +10,6 @@ import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionRe
 import com.springrest.springrestproject.model.ExecutionLog;
 import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.model.user.GroupName;
-import com.springrest.springrestproject.model.user.Role;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import com.springrest.springrestproject.repository.ExecutionLogRepo;
 import com.springrest.springrestproject.service.implementations.ExecutionLogService;
@@ -71,12 +70,11 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUpCallers() {
-        jdbcTemplate.execute("DELETE FROM app_users WHERE username IN ('script_exec_test_engineer', 'script_exec_test_no_group')");
+        jdbcTemplate.execute("DELETE FROM sys_app_users WHERE username IN ('script_exec_test_engineer', 'script_exec_test_no_group')");
 
         AppUser engineer = AppUser.builder()
                 .username("script_exec_test_engineer")
                 .password(passwordEncoder.encode("password123"))
-                .role(Role.USER)
                 .active(true)
                 .build();
         scriptEngineerUserId = appUserRepo.save(engineer).id();
@@ -85,7 +83,6 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
         AppUser noGroupUser = AppUser.builder()
                 .username("script_exec_test_no_group")
                 .password(passwordEncoder.encode("password123"))
-                .role(Role.USER)
                 .active(true)
                 .build();
         noGroupUserId = appUserRepo.save(noGroupUser).id();
@@ -93,10 +90,10 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
 
     private ExecutionLog findLogByScript(String script) {
         Long id = jdbcTemplate.queryForObject(
-                "SELECT id FROM execution_logs WHERE script = ? ORDER BY id DESC LIMIT 1",
+                "SELECT id FROM sys_execution_logs WHERE script = ? ORDER BY id DESC LIMIT 1",
                 Long.class, script);
         String executionId = jdbcTemplate.queryForObject(
-                "SELECT execution_id FROM execution_logs WHERE id = ?", String.class, id);
+                "SELECT execution_id FROM sys_execution_logs WHERE id = ?", String.class, id);
         Optional<ExecutionLog> found = executionLogRepo.findByExecutionId(executionId);
         assertTrue(found.isPresent());
         return found.get();
@@ -183,7 +180,7 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
      * message key like "error.bad_request" rather than the actual detail carried in getArgs().
      * TablesProxy wraps a malformed tables.select() query as
      * ApplicationException(BAD_REQUEST, "Failed to parse query: ...") - this drives that path
-     * and asserts the persisted execution_logs.error_message contains the resolved error code
+     * and asserts the persisted sys_execution_logs.error_message contains the resolved error code
      * name and detail, not just the raw key.
      */
     @Test

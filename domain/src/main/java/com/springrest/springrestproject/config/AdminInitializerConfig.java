@@ -1,7 +1,7 @@
 package com.springrest.springrestproject.config;
 
 import com.springrest.springrestproject.model.user.AppUser;
-import com.springrest.springrestproject.model.user.Role;
+import com.springrest.springrestproject.model.user.GroupName;
 import com.springrest.springrestproject.repository.AppUserRepo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +13,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 @Configuration
 @RequiredArgsConstructor
 public class AdminInitializerConfig {
+
+    private static final Long SYSTEM_ACTOR_ID = 0L;
 
     private final AppUserRepo userRepo;
     private final PasswordEncoder passwordEncoder;
@@ -26,15 +28,16 @@ public class AdminInitializerConfig {
     @Bean
     public CommandLineRunner initializeDefaultAdmin() {
         return args -> {
-            boolean adminExists = userRepo.existsByRole(Role.ADMIN);
-            if (!adminExists) {
+            if (!userRepo.existsByUsername(adminUsername)) {
                 AppUser defaultAdmin = AppUser.builder()
                         .username(adminUsername)
                         .password(passwordEncoder.encode(adminPassword))
-                        .role(Role.ADMIN)
                         .active(true)
                         .build();
-                userRepo.save(defaultAdmin);
+                AppUser saved = userRepo.saveInternal(defaultAdmin, true, SYSTEM_ACTOR_ID);
+                userRepo.saveGroupInternal(saved.id(), GroupName.ADMIN, SYSTEM_ACTOR_ID, true);
+                userRepo.saveGroupInternal(saved.id(), GroupName.REGISTERED_USER, SYSTEM_ACTOR_ID, true);
+                userRepo.saveGroupInternal(saved.id(), GroupName.DATABASE_ADMIN, SYSTEM_ACTOR_ID, true);
             }
         };
     }

@@ -12,6 +12,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import tools.jackson.databind.exc.ValueInstantiationException;
@@ -155,6 +156,19 @@ public class GlobalExceptionHandler {
             }
         }
         return null;
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDeniedException(AccessDeniedException ex) {
+        ErrorCode errorCode = ErrorCode.UNAUTHORIZED_ACCESS;
+        HttpStatus status = errorCode.getHttpStatus();
+        String localizedMessage = messageSource.getMessage(
+                errorCode.getMessageKey(),
+                null,
+                LocaleContextHolder.getLocale()
+        );
+        ApiResponse<Void> apiResponse = ApiResponse.failure(status.value(), localizedMessage);
+        return new ResponseEntity<>(apiResponse, status);
     }
 
     @ExceptionHandler(Exception.class)

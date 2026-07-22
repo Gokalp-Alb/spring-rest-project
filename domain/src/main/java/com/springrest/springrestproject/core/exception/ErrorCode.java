@@ -41,7 +41,11 @@ public enum ErrorCode {
     GROUP_ALREADY_EXISTS(HttpStatus.CONFLICT, "error.group_already_exists"),
     INVALID_GROUP_NAME(HttpStatus.BAD_REQUEST, "error.invalid_group_name"),
     SYSTEM_MANAGED_GROUP(HttpStatus.BAD_REQUEST, "error.system_managed_group"),
-    GROUP_NOT_FOUND(HttpStatus.NOT_FOUND, "error.group_not_found");
+    GROUP_NOT_FOUND(HttpStatus.NOT_FOUND, "error.group_not_found"),
+    RESERVED_TABLE_PREFIX(HttpStatus.BAD_REQUEST, "error.reserved_table_prefix"),
+    SYSTEM_TABLE_PROTECTED(HttpStatus.FORBIDDEN, "error.system_table_protected"),
+    RESTRICTED_ROW_MUTATION(HttpStatus.FORBIDDEN, "error.restricted_row_mutation"),
+    SYSTEM_ACCOUNT_GROUPS_LOCKED(HttpStatus.BAD_REQUEST, "error.system_account_groups_locked");
 
     private final HttpStatus httpStatus;
     private final String messageKey;

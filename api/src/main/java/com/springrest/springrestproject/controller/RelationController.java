@@ -8,6 +8,7 @@ import com.springrest.springrestproject.dto.response.relation.RelationResponse;
 import jakarta.validation.Valid;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.http.HttpStatus;
@@ -23,6 +24,7 @@ public class RelationController {
 
     @PostMapping("/one-to-one")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('DATABASE_ADMIN')")
     public ApiResponse<RelationResponse> createOneToOneRelation(@Valid @RequestBody DirectRelationRequest request,
                                                     @AuthenticationPrincipal Jwt jwt) {
         RelationResponse response = relationService.createOneToOneRelation(request, jwt.getClaim("userId"));
@@ -31,6 +33,7 @@ public class RelationController {
 
     @PostMapping("/many-to-one")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('DATABASE_ADMIN')")
     public ApiResponse<RelationResponse> createManyToOneRelation(@Valid @RequestBody DirectRelationRequest request,
                                                      @AuthenticationPrincipal Jwt jwt) {
         RelationResponse response = relationService.createManyToOneRelation(request, jwt.getClaim("userId"));
@@ -39,6 +42,7 @@ public class RelationController {
 
     @PostMapping("/many-to-many")
     @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('DATABASE_ADMIN')")
     public ApiResponse<RelationResponse> createManyToManyRelation(@Valid @RequestBody ManyToManyRelationRequest request,
                                                       @AuthenticationPrincipal Jwt jwt) {
         RelationResponse response = relationService.createManyToManyRelation(request, jwt.getClaim("userId"));
