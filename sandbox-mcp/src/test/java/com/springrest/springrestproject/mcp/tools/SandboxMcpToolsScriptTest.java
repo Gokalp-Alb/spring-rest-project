@@ -4,7 +4,11 @@ import com.springrest.scripting.engine.ScriptExecutionService;
 import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.core.model.scripting.ScriptType;
 import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionResponse;
+import com.springrest.springrestproject.model.Script;
+import com.springrest.springrestproject.service.implementations.Kafka.KafkaMappingService;
+import com.springrest.springrestproject.service.implementations.ScriptManagementService;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -38,13 +42,16 @@ class SandboxMcpToolsScriptTest {
     private final IDatabaseManagementService databaseManagementService = mock(IDatabaseManagementService.class);
     private final IPersonalAccessTokenService patService = mock(IPersonalAccessTokenService.class);
     private final ScriptExecutionService scriptExecutionService = mock(ScriptExecutionService.class);
+    private final ScriptManagementService scriptManagementService = mock(ScriptManagementService.class);
+    private final KafkaMappingService kafkaMappingService = mock(KafkaMappingService.class);
 
     private SandboxMcpTools sandboxMcpTools;
 
     @BeforeEach
     void setUp() {
         sandboxMcpTools = new SandboxMcpTools(metadataService, dataService, relationService, userService,
-                sandboxDataSource, databaseManagementService, patService, scriptExecutionService);
+                sandboxDataSource, databaseManagementService, patService, scriptExecutionService,
+                scriptManagementService, kafkaMappingService);
         ReflectionTestUtils.setField(sandboxMcpTools, "mcpPat", "pat_test_token");
     }
 
@@ -52,12 +59,12 @@ class SandboxMcpToolsScriptTest {
     void executeScript_resolvesUserFromPatAndDelegatesToScriptExecutionService() {
         when(patService.validateTokenAndGetUserId("pat_test_token")).thenReturn(7L);
         ScriptExecutionResponse expected = new ScriptExecutionResponse(3, List.of());
-        when(scriptExecutionService.execute(eq("1+2;"), any(ScriptCaller.class), eq(false))).thenReturn(expected);
+        when(scriptExecutionService.executeAdhoc(eq("1+2;"), any(ScriptCaller.class), eq(false))).thenReturn(expected);
 
         ScriptExecutionResponse actual = sandboxMcpTools.executeScript("1+2;");
 
         assertEquals(expected, actual);
-        verify(scriptExecutionService).execute(
+        verify(scriptExecutionService).executeAdhoc(
                 eq("1+2;"),
                 argThat(caller -> "7".equals(caller.userId()) && caller.roles().contains("MCP")),
                 eq(false));
@@ -72,7 +79,7 @@ class SandboxMcpToolsScriptTest {
         );
 
         assertEquals(ErrorCode.UNAUTHORIZED_ACCESS, ex.getErrorCode());
-        verify(scriptExecutionService, never()).execute(any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
+        verify(scriptExecutionService, never()).executeAdhoc(any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
     }
 
     @Test
@@ -82,7 +89,7 @@ class SandboxMcpToolsScriptTest {
         // A valid PAT for a user without the group must still surface UNAUTHORIZED_ACCESS
         // unchanged through this layer.
         when(patService.validateTokenAndGetUserId("pat_test_token")).thenReturn(99L);
-        when(scriptExecutionService.execute(eq("1;"), any(ScriptCaller.class), eq(false)))
+        when(scriptExecutionService.executeAdhoc(eq("1;"), any(ScriptCaller.class), eq(false)))
                 .thenThrow(new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Caller does not have SCRIPT_ENGINEER role"));
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
@@ -90,9 +97,76 @@ class SandboxMcpToolsScriptTest {
         );
 
         assertEquals(ErrorCode.UNAUTHORIZED_ACCESS, ex.getErrorCode());
-        verify(scriptExecutionService).execute(
+        verify(scriptExecutionService).executeAdhoc(
                 eq("1;"),
                 argThat(caller -> "99".equals(caller.userId())),
                 eq(false));
+    }
+
+    @Test
+    void createScript_resolvesUserFromPatAndDelegatesToScriptManagementService() {
+        when(patService.validateTokenAndGetUserId("pat_test_token")).thenReturn(7L);
+        Script expected = Script.builder().id(1L).scriptType(ScriptType.DB).tableId(5L).scriptBody("x;").build();
+        when(scriptManagementService.createScript(ScriptType.DB, 5L, null, "x;", 7L)).thenReturn(expected);
+
+        Script actual = sandboxMcpTools.createScript(ScriptType.DB, 5L, null, "x;");
+
+        assertEquals(expected, actual);
+        verify(scriptManagementService).createScript(ScriptType.DB, 5L, null, "x;", 7L);
+    }
+
+    @Test
+    void createScript_withoutPat_throwsUnauthorizedAndNeverCallsService() {
+        ReflectionTestUtils.setField(sandboxMcpTools, "mcpPat", "");
+
+        ApplicationException ex = assertThrows(ApplicationException.class, () ->
+                sandboxMcpTools.createScript(ScriptType.DB, 5L, null, "x;")
+        );
+
+        assertEquals(ErrorCode.UNAUTHORIZED_ACCESS, ex.getErrorCode());
+        verify(scriptManagementService, never()).createScript(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void updateScript_resolvesUserFromPatAndDelegatesToScriptManagementService() {
+        when(patService.validateTokenAndGetUserId("pat_test_token")).thenReturn(7L);
+        Script expected = Script.builder().id(1L).scriptType(ScriptType.DB).tableId(5L).scriptBody("y;").build();
+        when(scriptManagementService.updateScript(1L, "y;", 7L)).thenReturn(expected);
+
+        Script actual = sandboxMcpTools.updateScript(1L, "y;");
+
+        assertEquals(expected, actual);
+        verify(scriptManagementService).updateScript(1L, "y;", 7L);
+    }
+
+    @Test
+    void deleteScript_resolvesUserFromPatAndDelegatesToScriptManagementService() {
+        when(patService.validateTokenAndGetUserId("pat_test_token")).thenReturn(7L);
+
+        sandboxMcpTools.deleteScript(1L);
+
+        verify(scriptManagementService).deleteScript(1L, 7L);
+    }
+
+    @Test
+    void getScript_delegatesToScriptManagementServiceWithoutRequiringPat() {
+        ReflectionTestUtils.setField(sandboxMcpTools, "mcpPat", "");
+        Script expected = Script.builder().id(1L).scriptType(ScriptType.DB).tableId(5L).scriptBody("z;").build();
+        when(scriptManagementService.getScript(1L)).thenReturn(expected);
+
+        Script actual = sandboxMcpTools.getScript(1L);
+
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void listScripts_delegatesToScriptManagementServiceWithoutRequiringPat() {
+        ReflectionTestUtils.setField(sandboxMcpTools, "mcpPat", "");
+        Script script = Script.builder().id(1L).scriptType(ScriptType.DB).tableId(5L).scriptBody("z;").build();
+        when(scriptManagementService.listScripts()).thenReturn(List.of(script));
+
+        List<Script> actual = sandboxMcpTools.listScripts();
+
+        assertEquals(List.of(script), actual);
     }
 }

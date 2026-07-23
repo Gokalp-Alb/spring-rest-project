@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 public record ExecutionLog(
     Long id,
     String executionId,
-    String script,
+    Long scriptId,
     String caller,
     ExecutionStatus status,
     String output,

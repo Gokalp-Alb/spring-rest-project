@@ -24,6 +24,20 @@
             <artifactId>scripting</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!--
+            Reuses domain's BaseIntegrationTest/DomainTestApplication (Testcontainers Postgres +
+            Redis + Flyway bootstrap) for DataServiceHookIntegrationTest's @SpringBootTest. This is
+            the one module where a real DataService and a real ScriptHookInvokerImpl (from
+            scripting) coexist in the same Spring context, since domain cannot depend on scripting
+            (scripting already depends on domain, so the reverse would be circular).
+        -->
+        <dependency>
+            <groupId>com.springrest</groupId>
+            <artifactId>domain</artifactId>
+            <version>${project.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -47,6 +61,37 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <!--
+            Testcontainers/Redis dependencies for BaseIntegrationTest, matching scripting/pom.xml's
+            pattern: domain's own test-scoped Spring Boot Test / Testcontainers dependencies are
+            not transitive via the domain test-jar, so they are declared again here.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.redis</groupId>
+            <artifactId>testcontainers-redis</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>1.19.8</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>1.19.8</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
     </dependencies>
 

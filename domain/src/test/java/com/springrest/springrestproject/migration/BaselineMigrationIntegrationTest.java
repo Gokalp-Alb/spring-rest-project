@@ -88,4 +88,72 @@ class BaselineMigrationIntegrationTest extends BaseIntegrationTest {
                 "SELECT COUNT(*) FROM sys_relation_metadata WHERE is_restricted = true", Integer.class);
         assertEquals(2, count);
     }
+
+    @Test
+    void sysKafkaTopicsTableExists() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'sys_kafka_topics'",
+                Integer.class);
+        assertEquals(1, count);
+    }
+
+    @Test
+    void sysKafkaTableMappingsHasTopicIdNotKafkaTopic() {
+        Integer topicIdCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sys_kafka_table_mappings' AND column_name = 'topic_id'",
+                Integer.class);
+        assertEquals(1, topicIdCount);
+        Integer kafkaTopicCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sys_kafka_table_mappings' AND column_name = 'kafka_topic'",
+                Integer.class);
+        assertEquals(0, kafkaTopicCount);
+    }
+
+    @Test
+    void sysScriptsTableExistsWithTypeConstraintAndUniqueIndexes() {
+        Integer tableCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'sys_scripts'", Integer.class);
+        assertEquals(1, tableCount);
+
+        Integer checkCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.table_constraints " +
+                        "WHERE table_name = 'sys_scripts' AND constraint_type = 'CHECK' AND constraint_name = 'sys_scripts_type_target_chk'",
+                Integer.class);
+        assertEquals(1, checkCount);
+
+        Integer indexCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'sys_scripts' " +
+                        "AND indexname IN ('sys_scripts_one_per_table', 'sys_scripts_one_per_topic')",
+                Integer.class);
+        assertEquals(2, indexCount);
+    }
+
+    @Test
+    void sysScriptsLogTableExists() {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'sys_scripts_log'", Integer.class);
+        assertEquals(1, count);
+    }
+
+    @Test
+    void sysExecutionLogsHasScriptIdNotScript() {
+        Integer scriptIdCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sys_execution_logs' AND column_name = 'script_id'",
+                Integer.class);
+        assertEquals(1, scriptIdCount);
+        Integer scriptCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'sys_execution_logs' AND column_name = 'script'",
+                Integer.class);
+        assertEquals(0, scriptCount);
+    }
+
+    @Test
+    void newSysTablesAreRegisteredAndRestricted() {
+        for (String tbl : new String[]{"sys_kafka_topics", "sys_scripts", "sys_scripts_log"}) {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM sys_table_metadata WHERE table_name = ? AND is_restricted = true",
+                    Integer.class, tbl);
+            assertEquals(1, count, "missing registry row for: " + tbl);
+        }
+    }
 }

@@ -8,10 +8,11 @@ A highly flexible, metadata-driven Spring Boot platform designed to bypass compi
 
 The workspace is organized as a multi-module Maven project separating the core domain logic, web controllers, and Model Context Protocol (MCP) server adapters.
 
-* **domain**: The core engine module. Contains the schema registry services, caching configurations (Redis), database migrations (Flyway), query parser helper classes, and transaction layers.
-* **api**: The HTTP entry point module. Exposes standard REST endpoints for authentication, user management, schema mutations, dynamic data manipulations, and event integration.
-* **mcp-server**: A stdio-based Model Context Protocol (MCP) server. Exposes a read-only subset of database querying and schema inspection tools to AI agents.
-* **sandbox-mcp**: A stdio-based write-capable MCP server. Allows AI agents to interact with a dedicated sandbox database to test migrations, dynamic table creation, and insertions in isolation.
+* **domain**: The core engine module. Contains the schema registry services, caching configurations (Redis), database migrations (Flyway), query parser helper classes, group-based governance guards, and transaction layers. Also defines the `ScriptHookInvoker`/`ScriptHookSession` interfaces consumed by `DataService` and the Kafka publisher/processor, without depending on `scripting` itself.
+* **api**: The HTTP entry point module. Exposes standard REST endpoints for authentication, user/group management, schema mutations, dynamic data manipulations, event integration, script execution, and system administration.
+* **scripting**: Houses the GraalVM Polyglot (JavaScript) execution engine. Powers both ad-hoc script execution (`POST /api/script`) and persisted hook scripts (`sys_scripts`) that fire on database writes and Kafka publish/consume events, implementing the SPI defined in `domain`.
+* **mcp-server**: A stdio-based Model Context Protocol (MCP) server operating against the live database. Exposes read tools for schema/data/relations/users alongside PAT-gated write and administrative tools (table/data mutations, script execution and management, Kafka mapping management, database reset).
+* **sandbox-mcp**: A stdio-based write-capable MCP server. Allows AI agents to interact with a dedicated sandbox database to test migrations, dynamic table creation, and insertions in isolation, mirroring the same tool surface as `mcp-server`.
 
 ---
 
@@ -22,7 +23,8 @@ The workspace is organized as a multi-module Maven project separating the core d
 * **Database Migration**: Flyway manages foundational system metadata and user tables.
 * **Caching Layer**: Spring Data Redis configured with a custom **Jackson 3 (`tools.jackson`)** ObjectMapper for high-performance cache-aside caching.
 * **Message Broker & Event Streaming**: Spring Kafka utilizing customized concurrent listener containers to hot-swap background consumer worker threads dynamically at runtime.
-* **Security & Auth**: Spring Security utilizing JSON Web Tokens (JWT) through OAuth2 Resource Server boundaries.
+* **Scripting Runtime**: GraalVM Polyglot (`org.graalvm.polyglot`) sandboxed JavaScript execution contexts, powering both ad-hoc scripts and persisted hook scripts, with a watchdog-based execution timeout, optional Chrome DevTools Inspector debugging, and a Redis-backed namespaced cache API exposed to hook scripts.
+* **Security & Auth**: Spring Security utilizing JSON Web Tokens (JWT) through OAuth2 Resource Server boundaries, with group-based (`sys_user_groups`) role authorization.
 * **Integration Testing (Docker & Testcontainers)**: Driven by **Testcontainers** to instantiate isolated, disposable infrastructure. It interacts with a local Docker daemon to automatically pull, run, and tear down short-lived PostgreSQL, Redis, and Kafka broker containers.
 
 ---
@@ -30,7 +32,7 @@ The workspace is organized as a multi-module Maven project separating the core d
 ## Core System Features
 
 ### 1. Metadata-Driven Registry and Constraint Auditing
-Instead of mapping compile-time Java classes directly to physical structures, layout states are maintained in registry catalog tables (`table_metadata` and `column_metadata`).
+Instead of mapping compile-time Java classes directly to physical structures, layout states are maintained in registry catalog tables (`sys_table_metadata` and `sys_column_metadata`).
 * **Uniqueness Constraints**: The engine respects unique indicators (`isUnique`) on column definitions to maintain integrity across custom partitions.
 * **Regex Pattern Validation**: Incoming payloads are checked against registered regex patterns (such as `EMAIL` or `PHONE` derived from the `ValidRegexPatterns` enum) at the boundary layer before executing database operations.
 
@@ -60,9 +62,9 @@ The core data service converts JSON query configurations into native PostgreSQL 
 * **SQL Identifier Validation**: Since structural elements (such as table names, column names, sorting directives, filter targets, and relation map keys) cannot be parameterized, the platform routes them through `SqlIdentifierValidator`. This validator screens all dynamic identifiers against the strict regex pattern `^[\p{L}_][\p{L}\p{N}_]*$`. This allows international Unicode letters, numbers, and underscores, while blocking space characters, quotes, hyphens (`-`), or comments (`--`) to neutralize identifier-based injection pathways.
 * **Recursive Query Tree Auditing**: The select query compiler recursively walks nested `QueryRequest` hierarchies to inspect and validate table references, projected field names, filtering columns, sorting columns, and nested relation alias keys at the boundary.
 
-### 5. Dynamic DDL & Mutation Auditing (`system_ddl_log`)
+### 5. Dynamic DDL & Mutation Auditing (`sys_ddl_log`)
 To record how dynamic database spaces mutate, mutations write a transaction entry.
-* **Schema Log**: DDL operations parse executions via `rebuildFullSql` to reconstruct the exact executed query string, recording the statement along with the performing user's context in the `system_ddl_log` repository.
+* **Schema Log**: DDL operations parse executions via `rebuildFullSql` to reconstruct the exact executed query string, recording the statement along with the performing user's context in the `sys_ddl_log` repository.
 * **Data Log**: For audited tables (`isAuditEnabled=true`), mutations (inserts, updates, deletes) automatically duplicate execution paths to record shadow historical records in corresponding target tables ending in `_log`.
 
 ### 6. Dynamic Query & Audit Query Engine
@@ -73,10 +75,22 @@ The SELECT engine supports standard data retrieval (`POST /api/queries/select`) 
 Fields flagged as sensitive in the column metadata registry are intercepted during projection translation. If a non-privileged query request arrives, the generator rewrites the SQL projection from a standard selector to an on-the-fly masked representation (e.g. `'********' AS sensitive_field`), ensuring values are redacted before leaving the database layer.
 
 ### 8. Dynamic Event Synchronization
-The platform includes an event synchronization interface mapping Kafka topics to database tables. It detects configuration changes in the background and spins up or terminates consumer worker threads dynamically without disrupting the main application container.
+The platform includes an event synchronization interface mapping Kafka topics to database tables. Topics are modeled as first-class entities (`sys_kafka_topics`, looked up by name and auto-created if absent) rather than raw strings, and `sys_kafka_table_mappings` binds a table to a topic and direction (`INBOUND`/`OUTBOUND`) via `topic_id`. It detects configuration changes in the background and spins up or terminates consumer worker threads dynamically without disrupting the main application container.
 
 ### 9. Loop Prevention Guardrail
 Updates processed by background synchronization workers run under a distinct system context (`userId = 0L`). The outbound transaction publisher checks this identifier and drops matching events, preventing infinite state-propagation loops between connected systems.
+
+### 10. Group-Based Access Control & Restricted System Tables
+User authorization is modeled as group membership (`sys_user_groups`) rather than a single role field. Recognized groups (`GroupName`): `ADMIN`, `REGISTERED_USER`, `SCRIPT_ENGINEER`, `KAFKA_ENGINEER`, `MCP_AGENT`, `DATABASE_ADMIN`. Endpoint access is enforced per-group in `SecurityConfig` (e.g. `SCRIPT_ENGINEER` for `/api/script/**`, `KAFKA_ENGINEER` for `/api/kafka-mappings/**`), and `sys_`-prefixed system tables are excluded from the generic dynamic-table CRUD path entirely, each backed instead by its own hand-written repository with an unconditional shadow `_log` write on every mutation.
+
+### 11. Script Execution Engine
+A GraalVM Polyglot JavaScript engine executes ad-hoc scripts submitted via `POST /api/script`, sandboxed with `console` (log capture) and `tables` (read-only `select` access) globals, a configurable execution timeout, and an unenforced memory-limit hint (GraalVM's open-source Polyglot API exposes no heap cap). Ad-hoc execution requires the `SCRIPT_ENGINEER` group and is entirely disabled when the `production` Spring profile is active (`SCRIPT_EXECUTION_DISABLED`). Optional Chrome DevTools Inspector debugging (`debug_enabled=true`) is available on port `4242`, guarded by a single-session lock so only one debug context can run at a time per process.
+
+### 12. Persisted Script Hooks
+Scripts can also be persisted against a table or Kafka topic (`sys_scripts`, managed via `/api/system-scripts`) and fire automatically rather than being invoked ad-hoc: `beforeSaveToDB`/`afterSaveToDB` around `DataService` inserts and updates, and `onOutboundTopic`/`onInboundTopic` around Kafka publish/consume. Hook scripts run inside the same transaction as the write that triggered them, so a thrown error inside a hook rolls back the write (and, for outbound hooks, the Kafka publish) that triggered it. Hook execution is never gated by the `production` profile, since hooks aren't an operator-reachable ad-hoc surface.
+
+### 13. Namespaced Script Cache
+Hook scripts (not ad-hoc scripts) additionally receive a `cache` global backed by Redis (`cache.get(key)`, `cache.set(key, value, ttlSeconds?)`, `cache.delete(key)`), automatically namespaced per script (`script:table:{tableId}:` or `script:topic:{topicId}:`) so cache keys never collide across scripts.
 
 ---
 
@@ -175,6 +189,10 @@ The application utilizes a custom `@PersistenceCache` annotation driven by an As
 * `GET /api/users/id/{id}`: Fetches user metadata details for the specified user ID.
 * `GET /api/users/name/{name}`: Fetches user metadata details for the specified username.
 * `DELETE /api/users/{id}`: Soft deletes and deactivates a user account.
+* `POST /api/users/{userId}/groups`: Adds a group membership to a user. Requires a `GroupRequest` payload (`groupName`, one of `ADMIN`, `REGISTERED_USER`, `SCRIPT_ENGINEER`, `KAFKA_ENGINEER`, `MCP_AGENT`, `DATABASE_ADMIN`).
+* `GET /api/users/{userId}/groups`: Lists all group memberships for a user.
+* `DELETE /api/users/{userId}/groups/id/{groupId}`: Removes a group membership by its own ID.
+* `DELETE /api/users/{userId}/groups/name/{groupName}`: Removes a group membership by group name.
 
 ### Schema Management (`/api/tables/*`)
 * `POST /api/tables/{tableName}`: Dynamically builds a physical PostgreSQL table and registers its structural metadata. Requires a `TableCreateRequest` payload outlining columns, types, validation regex, and sensitivity configurations.
@@ -202,9 +220,26 @@ The application utilizes a custom `@PersistenceCache` annotation driven by an As
 * `PUT /api/data/{tableName}/{id}`: Modifies columns of the record with the matching row ID.
 * `DELETE /api/data/{tableName}/{id}`: Deletes the record with the matching row ID.
 
-### Kafka Synchronization (`/api/kafka-mappings/*`)
-* `POST /api/kafka-mappings`: Binds a table to a Kafka topic configuration. Requires parameter bindings `tableName`, `kafkaTopic`, and `direction` (`INBOUND` or `OUTBOUND`).
-* `DELETE /api/kafka-mappings/{id}`: Removes the configuration binding and stops active inbound listener containers.
+### Kafka Synchronization (`/api/kafka-mappings/*`) (`KAFKA_ENGINEER` role required)
+* `POST /api/kafka-mappings`: Binds a table to a Kafka topic configuration. Requires query parameters `tableName`, `topicName`, and `direction` (`INBOUND` or `OUTBOUND`); the topic is looked up by name and auto-created (`sys_kafka_topics`) if it doesn't already exist.
+* `GET /api/kafka-mappings`: Lists all Kafka table mappings.
+* `GET /api/kafka-mappings/{id}`: Fetches a single mapping by its ID.
+* `PUT /api/kafka-mappings/{id}`: Updates a mapping's table, topic, direction, or active state. Requires query parameters `tableName`, `topicName`, `direction`, `active`; reconciles the live `INBOUND` consumer subscription if the topic, direction, or active state changes.
+* `DELETE /api/kafka-mappings/{id}`: Soft-deletes the mapping (marks it inactive) and stops its active inbound listener container if it had one.
+
+### Ad-Hoc Script Execution (`/api/script`) (`SCRIPT_ENGINEER` role required)
+* `POST /api/script`: Executes a JavaScript payload on the caller's behalf and returns its result alongside captured `console` output. Requires a `ScriptExecuteRequest` payload (`script`, optional `debug_enabled`). Returns `403 SCRIPT_EXECUTION_DISABLED` when the `production` Spring profile is active.
+
+### System Script (Hook) Management (`/api/system-scripts/*`) (`SCRIPT_ENGINEER` or `KAFKA_ENGINEER` role required)
+* `POST /api/system-scripts`: Creates a persisted hook script for a table (`script_type=DB`, requires `table_id`) or a Kafka topic (`script_type=KAFKA`, requires `topic_id`) - exactly one of the two must be set. Requires a `ScriptCreateRequest` payload.
+* `GET /api/system-scripts`: Lists all persisted hook scripts.
+* `GET /api/system-scripts/{id}`: Fetches a hook script by its ID.
+* `PUT /api/system-scripts/{id}`: Updates a hook script's body. Requires a `ScriptUpdateRequest` payload (`script_body`).
+* `DELETE /api/system-scripts/{id}`: Deletes a hook script.
+
+### System Administration (`/api/system/*`) (`ADMIN` group required)
+* `POST /api/system/reset-database`: Drops and recreates the database's baseline Flyway schema. Requires query parameter `confirm=yes-reset-db`.
+* `POST /api/system/evict-cache`: Evicts all cached table metadata and relation lookups from Redis.
 
 ---
 
@@ -214,42 +249,56 @@ The **Model Context Protocol (MCP)** is an open standard designed to enable Larg
 
 This project integrates Spring AI's MCP starter libraries to expose its dynamic database catalog as actionable AI "skills". When an AI assistant (like Claude Desktop or Google Antigravity) connects to these servers, it discovers the exposed tools automatically, letting the AI read, analyze, and mutate data dynamically using natural language.
 
-### 1. Read-Only MCP Server (`mcp-server`)
-Designed to give AI assistants safe, read-only visibility into database catalogs. It communicates via standard input/output (`stdio`) streams and exposes the following tools:
+### 1. Live-Database MCP Server (`mcp-server`)
+Connects AI assistants directly to the live application database over standard input/output (`stdio`) streams. Read tools (schema, data, relations, users) require no authentication; write and administrative tools require a valid Personal Access Token (PAT, configured via `--mcp.pat=<token>` at launch) and, where applicable, the corresponding group membership - the same authorization rules the REST endpoints enforce, reproduced at the tool layer since MCP calls bypass Spring Security entirely.
 
 * **Table Metadata & Schemas**:
   * `getAllTables`: Get a paginated list of all active tables in the database registry.
   * `getTableById`: Fetch table metadata definitions using its internal system ID.
   * `getTableByName`: Fetch table metadata definitions using the table name.
   * `generateSchemaForTable`: Generates a standard JSON Schema layout for a specific table name.
-* **Dynamic Queries & Selects**:
+  * `createTable`, `deleteTableByName`, `logSchemaChange`: create/drop tables and log manual DDL changes. Requires a PAT.
+* **Dynamic Queries & Data Mutations**:
   * `executeSelect`: Executes a complex SQL select query (with filter conditions, sort directives, and recursive nested relations).
   * `getTableData`: Pulls paginated raw data rows from a specific table name.
   * `findRowById`: Finds a specific row in a dynamic table using its primary key ID.
+  * `insertRow`, `updateRowById`, `deleteRowById`: mutate rows (supports nested relation records). Requires a PAT.
 * **Relational Mapping**:
   * `getAllRelations`: Get a list of all established relationships across the database catalog.
   * `getRelationsForTable`: Get all resolved relations (Forward, Reverse, M2M) linked to a specific table name.
+  * `createOneToOneRelation`, `createManyToOneRelation`, `createManyToManyRelation`, `insertManyToManyDataById`/`insertManyToManyDataByName`, `deleteManyToManyDataById`/`deleteManyToManyDataByName`: create relations and manage junction table data. Requires a PAT.
 * **User Catalog**:
   * `getAllUsers`: Get a paginated list of all registered application users.
   * `getUserById`: Fetch user metadata records using their system user ID.
   * `getUserByName`: Fetch user metadata records using their exact username.
   * `findByUsername`: Find a user entity by their username string.
+  * `createUser`, `deleteUserById`: manage user accounts. Requires a PAT and the `ADMIN` group.
+* **Scripting**:
+  * `executeScript`: executes an ad-hoc JavaScript payload. Requires a PAT and the `SCRIPT_ENGINEER` group; Chrome DevTools debugging is not available over MCP.
+  * `createScript`, `updateScript`, `deleteScript`, `getScript`, `listScripts`: manage persisted hook scripts (`sys_scripts`). Create/update/delete require a PAT and the `SCRIPT_ENGINEER` (DB scripts) or `KAFKA_ENGINEER` (Kafka scripts) group.
+* **Kafka Mapping Management**:
+  * `createKafkaMapping`, `updateKafkaMapping`, `removeKafkaMapping`: manage table-to-topic mappings. Requires a PAT and the `KAFKA_ENGINEER` group.
+  * `getKafkaMapping`, `listKafkaMappings`: read mapping configuration.
+* **Database Administration**:
+  * `resetSandboxDatabaseToDefault`: drops and recreates the connected database's baseline Flyway schema. Requires a PAT, the `ADMIN` group, and `confirm="yes-reset-db"`.
+  * `evictAllCache`: evicts cached table metadata and relations from Redis. Requires a PAT and the `ADMIN` group.
 
 ### 2. Write-Capable Sandbox MCP Server (`sandbox-mcp`)
-An isolated workspace enabling AI agents to experiment with schema design, relationship wiring, and mutations. It exposes write-capable tools alongside sandboxing controls:
+An isolated workspace enabling AI agents to experiment with schema design, relationship wiring, and mutations against a dedicated sandbox database. Most tools here operate as a fixed system user with no PAT required, by design, to allow unrestricted experimentation - the exceptions are database-wide administrative actions and scripting, which still enforce the same PAT/group checks as the live server since the underlying services (`DatabaseManagementService`, `ScriptExecutionService`, `ScriptManagementService`) apply those checks unconditionally, regardless of which module calls them.
 
 * **Sandbox Administration**:
-  * `resetSandboxDatabaseToDefault`: Drops all elements in the sandbox schema and runs Flyway migrations to recreate the baseline. Requires `confirm="yes-reset-sandbox"`.
+  * `resetSandboxDatabaseToDefault`: Drops all elements in the sandbox schema and runs Flyway migrations to recreate the baseline. Requires a PAT, the `ADMIN` group, and `confirm="yes-reset-db"`.
+  * `evictAllCache`: Evicts cached table metadata and relations from Redis. Requires a PAT and the `ADMIN` group.
   * `copyLiveDatabaseToSandbox`: Copies the entire schema layouts and data rows from the live database into the sandbox container. Requires `confirm="yes-overwrite-sandbox"`.
-* **Schema Design Tools**:
+* **Schema Design Tools** (no PAT required):
   * `createTable`: Creates a dynamic physical table layout and registers its columns and configurations.
   * `deleteTableByName`: Drops a physical table catalog and cascades registry cleanup.
   * `logSchemaChange`: Manually appends a raw DDL command change log entry.
-* **Data Mutation Tools**:
+* **Data Mutation Tools** (no PAT required):
   * `insertRow`: Inserts a data record into a table (supports recursive nested child insertions).
   * `updateRowById`: Modifies columns on a specific record by ID.
   * `deleteRowById`: Deletes a record from a table by ID.
-* **Junction & Relation Builders**:
+* **Junction & Relation Builders** (no PAT required):
   * `createOneToOneRelation`: Establishes a 1:1 direct mapping between two tables.
   * `createManyToOneRelation`: Establishes a N:1 dynamic relationship mapping.
   * `createManyToManyRelation`: Creates a N:M relationship mapping (creates intermediate `_jt` junction tables).
@@ -257,9 +306,14 @@ An isolated workspace enabling AI agents to experiment with schema design, relat
   * `deleteManyToManyDataById` / `deleteManyToManyDataByName`: Deletes mapping rows from dynamic junction tables.
 * **Dynamic Queries & Read Operations**:
   * Mirrors the same query tools (`getAllTables`, `getTableById`, `getTableByName`, `generateSchemaForTable`, `executeSelect`, `getTableData`, `findRowById`, `getAllRelations`, `getRelationsForTable`, `getAllUsers`, `getUserById`, `getUserByName`, `findByUsername`) to read state directly from the sandbox database.
-* **User Management**:
+* **User Management** (no PAT required):
   * `createUser`: Registers a new user.
   * `deleteUserById`: Deletes a user account by ID.
+* **Scripting**:
+  * `executeScript`: executes an ad-hoc JavaScript payload against the sandbox database. Requires a PAT and the `SCRIPT_ENGINEER` group.
+  * `createScript`, `updateScript`, `deleteScript`, `getScript`, `listScripts`: manage persisted hook scripts against the sandbox database. Create/update/delete require a PAT and the `SCRIPT_ENGINEER` (DB scripts) or `KAFKA_ENGINEER` (Kafka scripts) group.
+* **Kafka Mapping Management** (no PAT required):
+  * `createKafkaMapping`, `updateKafkaMapping`, `removeKafkaMapping`, `getKafkaMapping`, `listKafkaMappings`: manage table-to-topic mappings against the sandbox database.
 
 ### 3. Client Integration (Configuration Example)
 To connect an AI assistant (like Claude Desktop or the Antigravity IDE) to these MCP servers, declare them in the client's `mcp_config.json` configuration file:
@@ -267,23 +321,26 @@ To connect an AI assistant (like Claude Desktop or the Antigravity IDE) to these
 ```json
 {
   "mcpServers": {
-    "spring-read-mcp": {
+    "spring-mcp-server": {
       "command": "java",
       "args": [
         "-jar",
-        "C:/path/to/project/mcp-server/target/mcp-server-0.0.1-SNAPSHOT.jar"
+        "C:/path/to/project/mcp-server/target/mcp-server-0.0.1-SNAPSHOT.jar",
+        "--mcp.pat=<personal-access-token>"
       ]
     },
     "spring-sandbox-mcp": {
       "command": "java",
       "args": [
         "-jar",
-        "C:/path/to/project/sandbox-mcp/target/sandbox-mcp-0.0.1-SNAPSHOT.jar"
+        "C:/path/to/project/sandbox-mcp/target/sandbox-mcp-0.0.1-SNAPSHOT.jar",
+        "--mcp.pat=<personal-access-token>"
       ]
     }
   }
 }
 ```
+The `--mcp.pat` argument is optional for both servers. On `mcp-server` it's required to unlock write/administrative tools (table and data mutations, user/script/Kafka-mapping management, database reset/cache eviction) - read-only tools work without it. On `sandbox-mcp` it's only required for the scripting and administrative tools, since most sandbox tools intentionally run as a fixed system user without a PAT. Generate a token via `POST /api/auth/pat`.
 
 ---
 
@@ -314,6 +371,19 @@ APP_ADMIN_PASS=admin_password
 SANDBOX_DB_URL=jdbc:postgresql://localhost:5432/sandbox_project_db
 SANDBOX_DB_USER=your_sandbox_user
 SANDBOX_DB_PASS=your_sandbox_password
+```
+
+Additional optional properties (with defaults, set in `application.properties`):
+```properties
+# Script Execution Configuration (ad-hoc and hook scripts)
+script.execution.timeout-ms=5000
+script.execution.memory-limit-mb=64
+
+# MCP Personal Access Token (unlocks write/administrative MCP tools; see mcp-server/sandbox-mcp launch args)
+mcp.pat=
+
+# Spring Profile (setting this to "production" disables ad-hoc script execution via /api/script)
+spring.profiles.active=
 ```
 
 ### Running the Application
@@ -348,13 +418,3 @@ The test suite utilizes **Testcontainers** which communicates with the local Doc
 ```
 
 ---
-
-## Development Rules and Conventions
-
-When developing or integrating new features on this codebase, adhere to the following design boundaries:
-
-1. **Junction Table Lifecycles**: Many-to-Many junction tables (identifiable by ending in `_jt` and housing exactly two `MANY_TO_ONE` foreign keys) must be programmatically dropped when either of their parent tables is deleted, preserving relational consistency.
-2. **Orphan Column Drops**: When a parent table is deleted, child foreign key reference columns must be explicitly dropped (`ALTER TABLE child_table DROP COLUMN fk_column CASCADE`) to prevent dynamic catalog pollution.
-3. **Auditing Sync**: Schema mutations (`ALTER TABLE`) on audited tables must be synchronized to their corresponding shadow `_log` tables.
-4. **Empty Dynamic Table Inserts**: PostgreSQL does not support `INSERT INTO table () VALUES ()`. When writing integration tests that define custom user table metadata schemas and seed them directly, ensure the schemas contain at least one user-defined column (e.g. `name`). This prevents empty insertion statement syntax failures in test contexts where dynamic system columns are bypassed or mocked.
-5. **Spring Boot 4.x & Jackson 3 Compatibility**: Caching layers must strictly use Jackson 3 (`tools.jackson`) constructed via `JsonMapper.builder().findAndAddModules()` and use `BasicPolymorphicTypeValidator` to avoid serialization errors with dates or records.

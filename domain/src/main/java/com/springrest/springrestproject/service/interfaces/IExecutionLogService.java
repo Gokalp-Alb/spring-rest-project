@@ -8,7 +8,7 @@ import com.springrest.springrestproject.model.ExecutionLog;
 import java.util.List;
 
 public interface IExecutionLogService {
-    ExecutionLog logStart(String executionId, String script, String caller);
+    ExecutionLog logStart(String executionId, Long scriptId, String caller);
     void logSuccess(String executionId, String output);
     void logFailure(String executionId, String errorMessage);
     void logFailure(String executionId, String errorMessage, ExecutionStatus status);

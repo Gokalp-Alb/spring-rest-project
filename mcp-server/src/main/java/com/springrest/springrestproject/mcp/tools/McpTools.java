@@ -1,9 +1,11 @@
 package com.springrest.springrestproject.mcp.tools;
 
 import com.springrest.scripting.engine.ScriptExecutionService;
+import com.springrest.scripting.model.CallerOrigin;
 import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.core.model.scripting.ScriptType;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
 import com.springrest.springrestproject.dto.request.relation.DirectRelationRequest;
@@ -18,9 +20,13 @@ import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
 import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionResponse;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
+import com.springrest.springrestproject.model.KafkaTableMapping;
+import com.springrest.springrestproject.model.Script;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.model.user.AppUser;
 import com.springrest.springrestproject.model.user.GroupName;
+import com.springrest.springrestproject.service.implementations.Kafka.KafkaMappingService;
+import com.springrest.springrestproject.service.implementations.ScriptManagementService;
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -28,6 +34,7 @@ import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenS
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import org.springframework.ai.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -51,6 +58,8 @@ public class McpTools {
     private final IPersonalAccessTokenService patService;
     private final IDatabaseManagementService databaseManagementService;
     private final ScriptExecutionService scriptExecutionService;
+    private final ScriptManagementService scriptManagementService;
+    private final KafkaMappingService kafkaMappingService;
 
     @Value("${mcp.pat:}")
     private String mcpPat;
@@ -58,7 +67,8 @@ public class McpTools {
     public McpTools(IMetadataService metadataService, IDataService dataService,
                     IRelationService relationService, IUserService userService,
                     IPersonalAccessTokenService patService, IDatabaseManagementService databaseManagementService,
-                    ScriptExecutionService scriptExecutionService) {
+                    ScriptExecutionService scriptExecutionService, ScriptManagementService scriptManagementService,
+                    KafkaMappingService kafkaMappingService) {
         this.metadataService = metadataService;
         this.dataService = dataService;
         this.relationService = relationService;
@@ -66,6 +76,8 @@ public class McpTools {
         this.patService = patService;
         this.databaseManagementService = databaseManagementService;
         this.scriptExecutionService = scriptExecutionService;
+        this.scriptManagementService = scriptManagementService;
+        this.kafkaMappingService = kafkaMappingService;
     }
 
     private Long resolveActiveUserId(boolean requireWrite) {
@@ -82,6 +94,18 @@ public class McpTools {
         UserRequest executor = userService.getUserById(userId);
         if (!executor.groups().contains(GroupName.ADMIN)) {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Only ADMIN users are authorized to perform this operation.");
+        }
+    }
+
+    // KafkaMappingService performs no authorization of its own - the REST path
+    // (/api/kafka-mappings) is guarded entirely by SecurityConfig's
+    // .requestMatchers("/api/kafka-mappings/**").hasRole("KAFKA_ENGINEER"), which this MCP path
+    // bypasses. This check reproduces that same guarantee here so MCP callers can't create/edit/
+    // remove Kafka mappings without the role the REST endpoint would require.
+    private void verifyKafkaEngineerRole(Long userId) {
+        UserRequest executor = userService.getUserById(userId);
+        if (!executor.groups().contains(GroupName.KAFKA_ENGINEER)) {
+            throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Only KAFKA_ENGINEER users are authorized to perform this operation.");
         }
     }
 
@@ -293,7 +317,81 @@ public class McpTools {
     @McpTool(description = "Execute a JavaScript script against the database on the caller's behalf. Requires the SCRIPT_ENGINEER group and a valid PAT. Chrome DevTools debugging is not available over MCP (it requires a human attaching a browser) - use POST /api/script with debug_enabled=true for that instead.")
     public ScriptExecutionResponse executeScript(String script) {
         Long userId = resolveActiveUserId(true);
-        ScriptCaller caller = new ScriptCaller(String.valueOf(userId), Set.of("MCP"));
-        return scriptExecutionService.execute(script, caller, false);
+        ScriptCaller caller = new ScriptCaller(String.valueOf(userId), Set.of("MCP"), CallerOrigin.USER_SUBMITTED);
+        return scriptExecutionService.executeAdhoc(script, caller, false);
+    }
+
+    // ==========================================
+    // SYSTEM SCRIPT (HOOK) MANAGEMENT SERVICES
+    // ==========================================
+
+    @McpTool(description = "Create a hook script for a table (DB) or a Kafka topic (KAFKA). DB scripts run beforeSaveToDB/afterSaveToDB and require table_id (topic_id must be null); KAFKA scripts run onOutboundTopic/onInboundTopic and require topic_id (table_id must be null). Only one script may exist per table/topic. Unlike executeScript (ad-hoc), hook scripts get a 'cache' global in addition to 'console' and 'tables': cache.get(key), cache.set(key, value, ttlSeconds?), cache.delete(key). Each script's cache is automatically namespaced by its own table_id/topic_id, so keys never collide with other scripts' caches. Requires the SCRIPT_ENGINEER group for DB scripts, or the KAFKA_ENGINEER group for KAFKA scripts, and a valid PAT.")
+    public Script createScript(ScriptType scriptType,
+                                @McpToolParam(required = false, description = "Required (non-null) for DB scripts; omit/null for KAFKA scripts.") Long tableId,
+                                @McpToolParam(required = false, description = "Required (non-null) for KAFKA scripts; omit/null for DB scripts.") Long topicId,
+                                String scriptBody) {
+        Long userId = resolveActiveUserId(true);
+        return scriptManagementService.createScript(scriptType, tableId, topicId, scriptBody, userId);
+    }
+
+    @McpTool(description = "Update an existing hook script's body by its ID. As with createScript, hook scripts have a 'cache' global (cache.get/set/delete) namespaced to the script's own table_id/topic_id, alongside 'console' and 'tables'. Requires the SCRIPT_ENGINEER group for DB scripts, or the KAFKA_ENGINEER group for KAFKA scripts, and a valid PAT.")
+    public Script updateScript(Long id, String scriptBody) {
+        Long userId = resolveActiveUserId(true);
+        return scriptManagementService.updateScript(id, scriptBody, userId);
+    }
+
+    @McpTool(description = "Delete a hook script by its ID. Requires the SCRIPT_ENGINEER group for DB scripts, or the KAFKA_ENGINEER group for KAFKA scripts, and a valid PAT.")
+    public void deleteScript(Long id) {
+        Long userId = resolveActiveUserId(true);
+        scriptManagementService.deleteScript(id, userId);
+    }
+
+    @McpTool(description = "Get a hook script by its ID")
+    public Script getScript(Long id) {
+        return scriptManagementService.getScript(id);
+    }
+
+    @McpTool(description = "List all hook scripts")
+    public List<Script> listScripts() {
+        return scriptManagementService.listScripts();
+    }
+
+    // ==========================================
+    // KAFKA TABLE MAPPING SERVICES
+    // ==========================================
+
+    @McpTool(description = "Create a Kafka table mapping, routing a table to a Kafka topic in the given direction. direction=OUTBOUND publishes every INSERT/UPDATE/DELETE on tableName to the topic; direction=INBOUND starts a live consumer that replays INSERT/UPDATE/DELETE messages from the topic onto tableName. The topic is looked up by name and auto-created if it doesn't already exist. Requires the KAFKA_ENGINEER group and a valid PAT.")
+    public KafkaTableMapping createKafkaMapping(String tableName, String topicName, String direction) {
+        Long userId = resolveActiveUserId(true);
+        verifyKafkaEngineerRole(userId);
+        return kafkaMappingService.createMapping(tableName, topicName, direction);
+    }
+
+    @McpTool(description = "Update an existing Kafka table mapping by its ID (table, topic, direction, active). Changing topicName to a name that doesn't exist yet auto-creates it. Toggling active or changing direction/topic will start or stop the underlying INBOUND consumer as needed. Requires the KAFKA_ENGINEER group and a valid PAT.")
+    public KafkaTableMapping updateKafkaMapping(Long id, String tableName, String topicName, String direction, boolean active) {
+        Long userId = resolveActiveUserId(true);
+        verifyKafkaEngineerRole(userId);
+        return kafkaMappingService.updateMapping(id, tableName, topicName, direction, active);
+    }
+
+    @McpTool(description = "Soft-delete a Kafka table mapping by its ID (marks it inactive and stops its INBOUND consumer if it had one). Requires the KAFKA_ENGINEER group and a valid PAT.")
+    public void removeKafkaMapping(Long id) {
+        Long userId = resolveActiveUserId(true);
+        verifyKafkaEngineerRole(userId);
+        kafkaMappingService.removeMapping(id);
+    }
+
+    @McpTool(description = "Get a Kafka table mapping by its ID")
+    public KafkaTableMapping getKafkaMapping(Long id) {
+        Long userId = resolveActiveUserId(false);
+        verifyKafkaEngineerRole(userId);
+        return kafkaMappingService.getMapping(id);
+    }
+
+    @McpTool(description = "List all Kafka table mappings")
+    public List<KafkaTableMapping> listKafkaMappings() {
+        Long userId = resolveActiveUserId(false);
+        verifyKafkaEngineerRole(userId);
+        return kafkaMappingService.listMappings();
     }
 }

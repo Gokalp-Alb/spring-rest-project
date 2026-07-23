@@ -22,6 +22,8 @@ import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -36,15 +38,20 @@ public class ScriptExecutionService {
     private final IDataService dataService;
     private final ScriptExecutionProperties executionProperties;
     private final AppUserRepo appUserRepo;
+    private final Environment environment;
 
-    public ScriptExecutionService(ExecutionLogService logService, IDataService dataService, ScriptExecutionProperties executionProperties, AppUserRepo appUserRepo) {
+    public ScriptExecutionService(ExecutionLogService logService, IDataService dataService, ScriptExecutionProperties executionProperties, AppUserRepo appUserRepo, Environment environment) {
         this.logService = logService;
         this.dataService = dataService;
         this.executionProperties = executionProperties;
         this.appUserRepo = appUserRepo;
+        this.environment = environment;
     }
 
-    public ScriptExecutionResponse execute(String script, ScriptCaller caller, boolean debugEnabled) {
+    public ScriptExecutionResponse executeAdhoc(String script, ScriptCaller caller, boolean debugEnabled) {
+        if (environment.acceptsProfiles(Profiles.of("production"))) {
+            throw new ApplicationException(ErrorCode.SCRIPT_EXECUTION_DISABLED);
+        }
         if (caller == null || caller.roles() == null) {
             throw new ApplicationException(ErrorCode.UNAUTHORIZED_ACCESS, "Caller roles are required");
         }
@@ -65,7 +72,7 @@ public class ScriptExecutionService {
 
         String executionId = UUID.randomUUID().toString();
         String callerId = caller.userId();
-        logService.logStart(executionId, script, callerId);
+        logService.logStart(executionId, null, callerId);
 
         ValueToJsonConverter converter = new ValueToJsonConverter();
         ScriptExecutionContext executionContext = new ScriptExecutionContext(executionId, logService, converter);

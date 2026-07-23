@@ -33,8 +33,8 @@ public class DatabaseManagementService implements IDatabaseManagementService {
 
     @Override
     public String resetDatabaseToDefault(String confirm, Long userId) {
-        if (!"yes-reset-sandbox".equals(confirm)) {
-            throw new IllegalArgumentException("Action aborted. You must pass exactly 'yes-reset-sandbox' to confirm.");
+        if (!"yes-reset-db".equals(confirm)) {
+            throw new IllegalArgumentException("Action aborted. You must pass exactly 'yes-reset-db' to confirm.");
         }
 
         UserRequest executor = userService.getUserById(userId);

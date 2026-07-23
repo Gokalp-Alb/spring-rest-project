@@ -75,7 +75,7 @@ public class ScriptControllerTest {
         when(rateLimiterService.isAllowed(anyString(), anyInt(), anyInt()))
                 .thenReturn(true);
 
-        when(scriptExecutionService.execute(eq(script), any(ScriptCaller.class), eq(false)))
+        when(scriptExecutionService.executeAdhoc(eq(script), any(ScriptCaller.class), eq(false)))
                 .thenReturn(new ScriptExecutionResponse(1, List.of()));
 
         Jwt jwt = Jwt.withTokenValue("token")
@@ -104,7 +104,7 @@ public class ScriptControllerTest {
         when(rateLimiterService.isAllowed(anyString(), anyInt(), anyInt()))
                 .thenReturn(true);
 
-        when(scriptExecutionService.execute(eq(script), any(ScriptCaller.class), eq(true)))
+        when(scriptExecutionService.executeAdhoc(eq(script), any(ScriptCaller.class), eq(true)))
                 .thenReturn(new ScriptExecutionResponse(1, List.of()));
 
         Jwt jwt = Jwt.withTokenValue("token")

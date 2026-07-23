@@ -1,6 +1,7 @@
 package com.springrest.scripting.engine;
 
 import com.springrest.scripting.model.ScriptExecutionOptions;
+import com.springrest.scripting.proxy.CacheProxy;
 import com.springrest.scripting.proxy.ConsoleLogProxy;
 import com.springrest.scripting.proxy.TablesProxy;
 import com.springrest.springrestproject.core.exception.ApplicationException;
@@ -96,6 +97,19 @@ public class ScriptContextFactory {
         if (options.debugEnabled()) {
             DEBUG_SESSION_ACTIVE.set(false);
         }
+    }
+
+    public static Context createHookContext(ConsoleLogProxy console, TablesProxy tables, CacheProxy cache, ScriptExecutionOptions options) {
+        Context.Builder builder = Context.newBuilder("js")
+                .allowHostAccess(HostAccess.ALL)
+                .allowHostClassLookup(className -> false)
+                .option("engine.WarnInterpreterOnly", "false");
+
+        Context context = builder.build();
+        context.getBindings("js").putMember("console", console);
+        context.getBindings("js").putMember("tables", tables);
+        context.getBindings("js").putMember("cache", cache);
+        return context;
     }
 
     public static Value evalWithTimeout(Context context, Source source, long timeoutMs) {

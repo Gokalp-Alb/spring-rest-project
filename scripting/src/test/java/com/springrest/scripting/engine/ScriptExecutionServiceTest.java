@@ -1,5 +1,6 @@
 package com.springrest.scripting.engine;
 
+import com.springrest.scripting.model.CallerOrigin;
 import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.springrestproject.BaseIntegrationTest;
 import com.springrest.springrestproject.DomainTestApplication;
@@ -18,6 +19,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.TestPropertySource;
@@ -26,6 +29,9 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 // classes = DomainTestApplication.class is required here (unlike domain's own @SpringBootTest
 // classes, which don't need it): Spring Boot's @SpringBootTest only searches packages upward
@@ -60,6 +66,9 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
     private AppUserRepo appUserRepo;
 
     @Autowired
+    private ScriptExecutionProperties executionProperties;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
@@ -88,10 +97,15 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
         noGroupUserId = appUserRepo.save(noGroupUser).id();
     }
 
-    private ExecutionLog findLogByScript(String script) {
+    // NOTE: sys_execution_logs no longer stores the raw script text as of Task 8's schema change
+    // (only script_id, which is null for ad-hoc executions) - so the most recent log row for the
+    // given caller is used to identify the just-completed execution instead of matching on script
+    // text. Each test recreates its callers in @BeforeEach and drives exactly one relevant
+    // execution per caller, so "latest row for this caller" is unambiguous.
+    private ExecutionLog findLogByScript(String callerId) {
         Long id = jdbcTemplate.queryForObject(
-                "SELECT id FROM sys_execution_logs WHERE script = ? ORDER BY id DESC LIMIT 1",
-                Long.class, script);
+                "SELECT id FROM sys_execution_logs WHERE caller = ? ORDER BY id DESC LIMIT 1",
+                Long.class, callerId);
         String executionId = jdbcTemplate.queryForObject(
                 "SELECT execution_id FROM sys_execution_logs WHERE id = ?", String.class, id);
         Optional<ExecutionLog> found = executionLogRepo.findByExecutionId(executionId);
@@ -101,10 +115,10 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
 
     @Test
     void execute_returnsResultAndCollectedLogs() {
-        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of(), CallerOrigin.USER_SUBMITTED);
         String script = "console.log('hello'); console.warn('careful'); 1 + 2;";
 
-        ScriptExecutionResponse response = scriptExecutionService.execute(script, caller, false);
+        ScriptExecutionResponse response = scriptExecutionService.executeAdhoc(script, caller, false);
 
         assertEquals(3, response.result());
         assertEquals(2, response.logs().size());
@@ -116,31 +130,31 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
 
     @Test
     void execute_throwsWhenCallerLacksScriptEngineerRole() {
-        ScriptCaller caller = new ScriptCaller(String.valueOf(noGroupUserId), Set.of());
+        ScriptCaller caller = new ScriptCaller(String.valueOf(noGroupUserId), Set.of(), CallerOrigin.USER_SUBMITTED);
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute("1;", caller, false)
+                scriptExecutionService.executeAdhoc("1;", caller, false)
         );
         assertEquals(ErrorCode.UNAUTHORIZED_ACCESS, ex.getErrorCode());
     }
 
     @Test
     void execute_throwsWhenScriptExceedsSizeLimit() {
-        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of(), CallerOrigin.USER_SUBMITTED);
         String oversized = "1".repeat(100_001);
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute(oversized, caller, false)
+                scriptExecutionService.executeAdhoc(oversized, caller, false)
         );
         assertEquals(ErrorCode.SCRIPT_INVALID_PAYLOAD, ex.getErrorCode());
     }
 
     @Test
     void execute_wrapsRuntimeScriptErrorsAsApplicationException() {
-        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of(), CallerOrigin.USER_SUBMITTED);
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute("throw new Error('boom');", caller, false)
+                scriptExecutionService.executeAdhoc("throw new Error('boom');", caller, false)
         );
         assertEquals(ErrorCode.SCRIPT_QUERY_FAILED, ex.getErrorCode());
     }
@@ -157,20 +171,22 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
      */
     @Test
     void execute_cancelsScriptThatExceedsTimeoutWithoutDoubleCloseMaskingTheFailure() {
-        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of(), CallerOrigin.USER_SUBMITTED);
+        Environment nonProdEnvironment = mock(Environment.class);
+        when(nonProdEnvironment.acceptsProfiles(any(Profiles.class))).thenReturn(false);
         ScriptExecutionService shortTimeoutService = new ScriptExecutionService(
-                logService, dataService, new ScriptExecutionProperties(200L, 64), appUserRepo);
+                logService, dataService, new ScriptExecutionProperties(200L, 64), appUserRepo, nonProdEnvironment);
         String script = "while(true){} // timeout-regression-" + System.nanoTime();
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                shortTimeoutService.execute(script, caller, false)
+                shortTimeoutService.executeAdhoc(script, caller, false)
         );
 
         assertEquals(ErrorCode.SCRIPT_QUERY_FAILED, ex.getErrorCode());
 
         // Persisted status must distinguish a watchdog timeout from an ordinary runtime FAILED
         // execution - see Finding 1 of the final whole-branch review.
-        ExecutionLog persisted = findLogByScript(script);
+        ExecutionLog persisted = findLogByScript(String.valueOf(scriptEngineerUserId));
         assertEquals(ExecutionStatus.TIMEOUT, persisted.status());
     }
 
@@ -185,18 +201,29 @@ class ScriptExecutionServiceTest extends BaseIntegrationTest {
      */
     @Test
     void execute_persistsResolvedApplicationExceptionDetailNotBareMessageKey() {
-        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of());
+        ScriptCaller caller = new ScriptCaller(String.valueOf(scriptEngineerUserId), Set.of(), CallerOrigin.USER_SUBMITTED);
         String script = "tables.select({tableName: 'test_table', page: 'not-a-number'}); // " + System.nanoTime();
 
         ApplicationException ex = assertThrows(ApplicationException.class, () ->
-                scriptExecutionService.execute(script, caller, false)
+                scriptExecutionService.executeAdhoc(script, caller, false)
         );
         assertEquals(ErrorCode.BAD_REQUEST, ex.getErrorCode());
 
-        ExecutionLog persisted = findLogByScript(script);
+        ExecutionLog persisted = findLogByScript(String.valueOf(scriptEngineerUserId));
         assertEquals(ExecutionStatus.FAILED, persisted.status());
         assertNotEquals(ErrorCode.BAD_REQUEST.getMessageKey(), persisted.errorMessage());
         assertTrue(persisted.errorMessage().contains("BAD_REQUEST"));
         assertTrue(persisted.errorMessage().contains("Failed to parse query"));
+    }
+
+    @Test
+    void executeAdhocThrowsWhenProfileIsProduction() {
+        Environment prodEnvironment = mock(Environment.class);
+        when(prodEnvironment.acceptsProfiles(any(Profiles.class))).thenReturn(true);
+        ScriptExecutionService prodService = new ScriptExecutionService(logService, dataService, executionProperties, appUserRepo, prodEnvironment);
+
+        ApplicationException ex = assertThrows(ApplicationException.class, () ->
+                prodService.executeAdhoc("1+1", new ScriptCaller("1", Set.of("SCRIPT_ENGINEER"), CallerOrigin.USER_SUBMITTED), false));
+        assertEquals(ErrorCode.SCRIPT_EXECUTION_DISABLED, ex.getErrorCode());
     }
 }

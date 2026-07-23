@@ -34,7 +34,7 @@ public class DynamicInboundConsumerManager {
             Number idNum = (Number) messageBody.get("id");
             Long targetId = idNum != null ? idNum.longValue() : null;
 
-            inboundProcessor.processInboundEvent(action, payload, targetTableName, targetId);
+            inboundProcessor.processInboundEvent(action, payload, targetTableName, targetId, topic);
         });
 
         ConcurrentMessageListenerContainer<String, Map<String, Object>> container =

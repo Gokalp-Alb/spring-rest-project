@@ -1,9 +1,11 @@
 package com.springrest.springrestproject.mcp.tools;
 
 import com.springrest.scripting.engine.ScriptExecutionService;
+import com.springrest.scripting.model.CallerOrigin;
 import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
+import com.springrest.springrestproject.core.model.scripting.ScriptType;
 import com.springrest.springrestproject.dto.response.scripting.ScriptExecutionResponse;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
@@ -18,8 +20,12 @@ import com.springrest.springrestproject.dto.response.relation.RelationResponse;
 import com.springrest.springrestproject.dto.response.relation.ResolvedRelation;
 import com.springrest.springrestproject.dto.response.table.TableResponse;
 import com.springrest.springrestproject.dto.response.user.UserResponse;
+import com.springrest.springrestproject.model.KafkaTableMapping;
+import com.springrest.springrestproject.model.Script;
 import com.springrest.springrestproject.model.table.TableMetadata;
 import com.springrest.springrestproject.model.user.AppUser;
+import com.springrest.springrestproject.service.implementations.Kafka.KafkaMappingService;
+import com.springrest.springrestproject.service.implementations.ScriptManagementService;
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
@@ -28,6 +34,7 @@ import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import org.flywaydb.core.Flyway;
 import org.springframework.ai.mcp.annotation.McpTool;
+import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -63,6 +70,8 @@ public class SandboxMcpTools {
     private final IDatabaseManagementService databaseManagementService;
     private final IPersonalAccessTokenService patService;
     private final ScriptExecutionService scriptExecutionService;
+    private final ScriptManagementService scriptManagementService;
+    private final KafkaMappingService kafkaMappingService;
 
     @Value("${mcp.pat:}")
     private String mcpPat;
@@ -91,7 +100,8 @@ public class SandboxMcpTools {
     public SandboxMcpTools(IMetadataService metadataService, IDataService dataService,
                            IRelationService relationService, IUserService userService,
                            DataSource sandboxDataSource, IDatabaseManagementService databaseManagementService,
-                           IPersonalAccessTokenService patService, ScriptExecutionService scriptExecutionService) {
+                           IPersonalAccessTokenService patService, ScriptExecutionService scriptExecutionService,
+                           ScriptManagementService scriptManagementService, KafkaMappingService kafkaMappingService) {
         this.metadataService = metadataService;
         this.dataService = dataService;
         this.relationService = relationService;
@@ -100,6 +110,8 @@ public class SandboxMcpTools {
         this.databaseManagementService = databaseManagementService;
         this.patService = patService;
         this.scriptExecutionService = scriptExecutionService;
+        this.scriptManagementService = scriptManagementService;
+        this.kafkaMappingService = kafkaMappingService;
     }
 
     private Long resolveActiveUserId(boolean requireWrite) {
@@ -346,7 +358,71 @@ public class SandboxMcpTools {
     @McpTool(description = "Execute a JavaScript script against the sandbox database on the caller's behalf. Requires the SCRIPT_ENGINEER group and a valid PAT. Chrome DevTools debugging is not available over MCP (it requires a human attaching a browser) - use POST /api/script with debug_enabled=true for that instead.")
     public ScriptExecutionResponse executeScript(String script) {
         Long userId = resolveActiveUserId(true);
-        ScriptCaller caller = new ScriptCaller(String.valueOf(userId), Set.of("MCP"));
-        return scriptExecutionService.execute(script, caller, false);
+        ScriptCaller caller = new ScriptCaller(String.valueOf(userId), Set.of("MCP"), CallerOrigin.USER_SUBMITTED);
+        return scriptExecutionService.executeAdhoc(script, caller, false);
+    }
+
+    // ==========================================
+    // SYSTEM SCRIPT (HOOK) MANAGEMENT SERVICES
+    // ==========================================
+
+    @McpTool(description = "Create a hook script for a table (DB) or a Kafka topic (KAFKA) in the sandbox database. DB scripts run beforeSaveToDB/afterSaveToDB and require table_id (topic_id must be null); KAFKA scripts run onOutboundTopic/onInboundTopic and require topic_id (table_id must be null). Only one script may exist per table/topic. Unlike executeScript (ad-hoc), hook scripts get a 'cache' global in addition to 'console' and 'tables': cache.get(key), cache.set(key, value, ttlSeconds?), cache.delete(key). Each script's cache is automatically namespaced by its own table_id/topic_id, so keys never collide with other scripts' caches. Requires the SCRIPT_ENGINEER group for DB scripts, or the KAFKA_ENGINEER group for KAFKA scripts, and a valid PAT.")
+    public Script createScript(ScriptType scriptType,
+                                @McpToolParam(required = false, description = "Required (non-null) for DB scripts; omit/null for KAFKA scripts.") Long tableId,
+                                @McpToolParam(required = false, description = "Required (non-null) for KAFKA scripts; omit/null for DB scripts.") Long topicId,
+                                String scriptBody) {
+        Long userId = resolveActiveUserId(true);
+        return scriptManagementService.createScript(scriptType, tableId, topicId, scriptBody, userId);
+    }
+
+    @McpTool(description = "Update an existing hook script's body by its ID. As with createScript, hook scripts have a 'cache' global (cache.get/set/delete) namespaced to the script's own table_id/topic_id, alongside 'console' and 'tables'. Requires the SCRIPT_ENGINEER group for DB scripts, or the KAFKA_ENGINEER group for KAFKA scripts, and a valid PAT.")
+    public Script updateScript(Long id, String scriptBody) {
+        Long userId = resolveActiveUserId(true);
+        return scriptManagementService.updateScript(id, scriptBody, userId);
+    }
+
+    @McpTool(description = "Delete a hook script by its ID. Requires the SCRIPT_ENGINEER group for DB scripts, or the KAFKA_ENGINEER group for KAFKA scripts, and a valid PAT.")
+    public void deleteScript(Long id) {
+        Long userId = resolveActiveUserId(true);
+        scriptManagementService.deleteScript(id, userId);
+    }
+
+    @McpTool(description = "Get a hook script by its ID")
+    public Script getScript(Long id) {
+        return scriptManagementService.getScript(id);
+    }
+
+    @McpTool(description = "List all hook scripts")
+    public List<Script> listScripts() {
+        return scriptManagementService.listScripts();
+    }
+
+    // ==========================================
+    // KAFKA TABLE MAPPING SERVICES
+    // ==========================================
+
+    @McpTool(description = "Create a Kafka table mapping in the sandbox database, routing a table to a Kafka topic in the given direction. direction=OUTBOUND publishes every INSERT/UPDATE/DELETE on tableName to the topic; direction=INBOUND starts a live consumer that replays INSERT/UPDATE/DELETE messages from the topic onto tableName. The topic is looked up by name and auto-created if it doesn't already exist.")
+    public KafkaTableMapping createKafkaMapping(String tableName, String topicName, String direction) {
+        return kafkaMappingService.createMapping(tableName, topicName, direction);
+    }
+
+    @McpTool(description = "Update an existing Kafka table mapping by its ID (table, topic, direction, active). Changing topicName to a name that doesn't exist yet auto-creates it. Toggling active or changing direction/topic will start or stop the underlying INBOUND consumer as needed.")
+    public KafkaTableMapping updateKafkaMapping(Long id, String tableName, String topicName, String direction, boolean active) {
+        return kafkaMappingService.updateMapping(id, tableName, topicName, direction, active);
+    }
+
+    @McpTool(description = "Soft-delete a Kafka table mapping by its ID (marks it inactive and stops its INBOUND consumer if it had one).")
+    public void removeKafkaMapping(Long id) {
+        kafkaMappingService.removeMapping(id);
+    }
+
+    @McpTool(description = "Get a Kafka table mapping by its ID")
+    public KafkaTableMapping getKafkaMapping(Long id) {
+        return kafkaMappingService.getMapping(id);
+    }
+
+    @McpTool(description = "List all Kafka table mappings")
+    public List<KafkaTableMapping> listKafkaMappings() {
+        return kafkaMappingService.listMappings();
     }
 }

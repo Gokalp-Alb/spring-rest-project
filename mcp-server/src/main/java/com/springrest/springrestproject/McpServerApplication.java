@@ -12,6 +12,8 @@ import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
 import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
+import com.springrest.springrestproject.service.implementations.ScriptManagementService;
+import com.springrest.springrestproject.service.implementations.Kafka.KafkaMappingService;
 import org.springframework.context.annotation.Bean;
 
 @SpringBootApplication(scanBasePackages = "com.springrest")
@@ -30,7 +32,9 @@ public class McpServerApplication {
             IUserService userService,
             IPersonalAccessTokenService patService,
             IDatabaseManagementService databaseManagementService,
-            ScriptExecutionService scriptExecutionService) {
-        return new McpTools(metadataService, dataService, relationService, userService, patService, databaseManagementService, scriptExecutionService);
+            ScriptExecutionService scriptExecutionService,
+            ScriptManagementService scriptManagementService,
+            KafkaMappingService kafkaMappingService) {
+        return new McpTools(metadataService, dataService, relationService, userService, patService, databaseManagementService, scriptExecutionService, scriptManagementService, kafkaMappingService);
     }
 }

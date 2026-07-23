@@ -39,14 +39,14 @@ class ExecutionLogServiceTest extends BaseIntegrationTest {
     @Test
     void shouldLogStartAndRetrieve() {
         String execId = UUID.randomUUID().toString();
-        String script = "console.log('hello');";
+        Long scriptId = null;
         String caller = "test_caller";
 
-        ExecutionLog log = executionLogService.logStart(execId, script, caller);
+        ExecutionLog log = executionLogService.logStart(execId, scriptId, caller);
         assertNotNull(log);
         assertNotNull(log.id());
         assertEquals(execId, log.executionId());
-        assertEquals(script, log.script());
+        assertEquals(scriptId, log.scriptId());
         assertEquals(caller, log.caller());
         assertEquals(ExecutionStatus.RUNNING, log.status());
         assertNotNull(log.createdAt());
@@ -60,7 +60,7 @@ class ExecutionLogServiceTest extends BaseIntegrationTest {
     @Test
     void shouldLogSuccess() {
         String execId = UUID.randomUUID().toString();
-        executionLogService.logStart(execId, "const a = 1;", "test_caller");
+        executionLogService.logStart(execId, null, "test_caller");
 
         executionLogService.logSuccess(execId, "1");
 
@@ -77,7 +77,7 @@ class ExecutionLogServiceTest extends BaseIntegrationTest {
     @Test
     void shouldLogFailure() {
         String execId = UUID.randomUUID().toString();
-        executionLogService.logStart(execId, "throw new Error();", "test_caller");
+        executionLogService.logStart(execId, null, "test_caller");
 
         executionLogService.logFailure(execId, "Syntax error at line 1");
 
@@ -92,7 +92,7 @@ class ExecutionLogServiceTest extends BaseIntegrationTest {
     @Test
     void shouldLogFailureWithExplicitStatus() {
         String execId = UUID.randomUUID().toString();
-        executionLogService.logStart(execId, "while(true){}", "test_caller");
+        executionLogService.logStart(execId, null, "test_caller");
 
         executionLogService.logFailure(execId, "BAD_REQUEST: [Failed to parse query]", ExecutionStatus.TIMEOUT);
 
@@ -107,7 +107,7 @@ class ExecutionLogServiceTest extends BaseIntegrationTest {
     @Test
     void shouldAppendEntriesInSequenceOrder() {
         String execId = UUID.randomUUID().toString();
-        executionLogService.logStart(execId, "console.info('a'); console.warn('b');", "test_caller");
+        executionLogService.logStart(execId, null, "test_caller");
 
         executionLogService.append(execId, com.springrest.springrestproject.core.model.scripting.LogLevel.INFO, "a", null);
         executionLogService.append(execId, com.springrest.springrestproject.core.model.scripting.LogLevel.WARN, "b", null);
@@ -127,7 +127,7 @@ class ExecutionLogServiceTest extends BaseIntegrationTest {
     @Test
     void shouldReturnEmptyListWhenNoEntriesLogged() {
         String execId = UUID.randomUUID().toString();
-        executionLogService.logStart(execId, "const a = 1;", "test_caller");
+        executionLogService.logStart(execId, null, "test_caller");
 
         assertTrue(executionLogService.getEntries(execId).isEmpty());
     }

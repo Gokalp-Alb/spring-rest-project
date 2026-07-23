@@ -1,10 +1,12 @@
 package com.springrest.springrestproject.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springrest.springrestproject.SpringRestProjectApplication;
 import com.springrest.springrestproject.config.SecurityConfig;
+import com.springrest.springrestproject.core.exception.ApplicationException;
+import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.model.KafkaTableMapping;
-import com.springrest.springrestproject.repository.KafkaTableMappingRepo;
-import com.springrest.springrestproject.service.implementations.Kafka.DynamicInboundConsumerManager;
+import com.springrest.springrestproject.service.implementations.Kafka.KafkaMappingService;
 import com.springrest.springrestproject.service.implementations.redis.RateLimiterService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -43,7 +46,12 @@ class KafkaMappingTestConfig implements WebMvcConfigurer {
     }
 }
 
+// classes = SpringRestProjectApplication.class is required here: domain's test-jar (pulled in
+// for DataServiceHookIntegrationTest) also puts DomainTestApplication (itself
+// @SpringBootApplication-annotated) on the test classpath, so an unqualified @WebMvcTest scan
+// finds two @SpringBootConfiguration classes and fails to boot.
 @WebMvcTest(KafkaMappingController.class)
+@ContextConfiguration(classes = SpringRestProjectApplication.class)
 @Import({KafkaMappingTestConfig.class, SecurityConfig.class})
 class KafkaMappingControllerTest {
 
@@ -52,13 +60,8 @@ class KafkaMappingControllerTest {
 
     private MockMvc mockMvc;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
     @MockitoBean
-    private KafkaTableMappingRepo mappingRepo;
-
-    @MockitoBean
-    private DynamicInboundConsumerManager consumerManager;
+    private KafkaMappingService mappingService;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -90,19 +93,14 @@ class KafkaMappingControllerTest {
     @Test
     void listMappingsReturnsOk() throws Exception {
         KafkaTableMapping mapping = KafkaTableMapping.builder()
-                .id(1L)
-                .tableName("orders")
-                .kafkaTopic("orders-topic")
-                .direction("OUTBOUND")
-                .active(true)
-                .build();
-        when(mappingRepo.findAll()).thenReturn(List.of(mapping));
+                .id(1L).tableName("orders").topicId(10L).direction("OUTBOUND").active(true).build();
+        when(mappingService.listMappings()).thenReturn(List.of(mapping));
 
         mockMvc.perform(get("/api/kafka-mappings")
                         .with(authentication(kafkaEngineerAuth())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].tableName").value("orders"))
-                .andExpect(jsonPath("$.data[0].kafkaTopic").value("orders-topic"));
+                .andExpect(jsonPath("$.data[0].topicId").value(10));
     }
 
     @Test
@@ -115,13 +113,8 @@ class KafkaMappingControllerTest {
     @Test
     void getMappingByIdReturnsOk() throws Exception {
         KafkaTableMapping mapping = KafkaTableMapping.builder()
-                .id(1L)
-                .tableName("orders")
-                .kafkaTopic("orders-topic")
-                .direction("OUTBOUND")
-                .active(true)
-                .build();
-        when(mappingRepo.findById(1L)).thenReturn(java.util.Optional.of(mapping));
+                .id(1L).tableName("orders").topicId(10L).direction("OUTBOUND").active(true).build();
+        when(mappingService.getMapping(1L)).thenReturn(mapping);
 
         mockMvc.perform(get("/api/kafka-mappings/1")
                         .with(authentication(kafkaEngineerAuth())))
@@ -131,7 +124,7 @@ class KafkaMappingControllerTest {
 
     @Test
     void getMappingByIdReturns404WhenNotFound() throws Exception {
-        when(mappingRepo.findById(999L)).thenReturn(java.util.Optional.empty());
+        when(mappingService.getMapping(999L)).thenThrow(new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND, "id: 999"));
 
         mockMvc.perform(get("/api/kafka-mappings/999")
                         .with(authentication(kafkaEngineerAuth())))
@@ -140,38 +133,25 @@ class KafkaMappingControllerTest {
 
     @Test
     void updateMappingReturnsOk() throws Exception {
-        KafkaTableMapping existing = KafkaTableMapping.builder()
-                .id(1L)
-                .tableName("orders")
-                .kafkaTopic("orders-topic")
-                .direction("OUTBOUND")
-                .active(true)
-                .build();
         KafkaTableMapping updated = KafkaTableMapping.builder()
-                .id(1L)
-                .tableName("orders")
-                .kafkaTopic("orders-topic-v2")
-                .direction("OUTBOUND")
-                .active(true)
-                .build();
-        when(mappingRepo.findById(1L)).thenReturn(java.util.Optional.of(existing));
-        when(mappingRepo.save(org.mockito.ArgumentMatchers.any())).thenReturn(updated);
+                .id(1L).tableName("orders").topicId(20L).direction("OUTBOUND").active(true).build();
+        when(mappingService.updateMapping(1L, "orders", "orders-topic-v2", "OUTBOUND", true)).thenReturn(updated);
 
         mockMvc.perform(put("/api/kafka-mappings/1")
                         .param("tableName", "orders")
-                        .param("kafkaTopic", "orders-topic-v2")
+                        .param("topicName", "orders-topic-v2")
                         .param("direction", "OUTBOUND")
                         .param("active", "true")
                         .with(authentication(kafkaEngineerAuth())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.kafkaTopic").value("orders-topic-v2"));
+                .andExpect(jsonPath("$.data.topicId").value(20));
     }
 
     @Test
     void updateMappingForbiddenWithoutKafkaEngineerRole() throws Exception {
         mockMvc.perform(put("/api/kafka-mappings/1")
                         .param("tableName", "orders")
-                        .param("kafkaTopic", "orders-topic")
+                        .param("topicName", "orders-topic")
                         .param("direction", "OUTBOUND")
                         .param("active", "true")
                         .with(authentication(registeredUserAuth())))
@@ -180,11 +160,12 @@ class KafkaMappingControllerTest {
 
     @Test
     void updateMappingReturns404WhenNotFound() throws Exception {
-        when(mappingRepo.findById(999L)).thenReturn(java.util.Optional.empty());
+        when(mappingService.updateMapping(999L, "orders", "orders-topic", "OUTBOUND", true))
+                .thenThrow(new ApplicationException(ErrorCode.RESOURCE_NOT_FOUND, "id: 999"));
 
         mockMvc.perform(put("/api/kafka-mappings/999")
                         .param("tableName", "orders")
-                        .param("kafkaTopic", "orders-topic")
+                        .param("topicName", "orders-topic")
                         .param("direction", "OUTBOUND")
                         .param("active", "true")
                         .with(authentication(kafkaEngineerAuth())))

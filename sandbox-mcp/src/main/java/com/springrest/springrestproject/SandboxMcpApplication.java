@@ -7,6 +7,8 @@ import com.springrest.springrestproject.service.interfaces.IDataService;
 import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.service.interfaces.IUserService;
+import com.springrest.springrestproject.service.implementations.ScriptManagementService;
+import com.springrest.springrestproject.service.implementations.Kafka.KafkaMappingService;
 import com.springrest.springrestproject.service.interfaces.IDatabaseManagementService;
 import com.springrest.springrestproject.service.interfaces.IPersonalAccessTokenService;
 import org.springframework.boot.SpringApplication;
@@ -31,8 +33,9 @@ public class SandboxMcpApplication {
     public SandboxMcpTools sandboxMcpTools(IMetadataService metadataService, IDataService dataService,
             IRelationService relationService, IUserService userService, DataSource dataSource,
             IDatabaseManagementService databaseManagementService, IPersonalAccessTokenService patService,
-            ScriptExecutionService scriptExecutionService) {
+            ScriptExecutionService scriptExecutionService, ScriptManagementService scriptManagementService,
+            KafkaMappingService kafkaMappingService) {
         return new SandboxMcpTools(metadataService, dataService, relationService, userService, dataSource,
-                databaseManagementService, patService, scriptExecutionService);
+                databaseManagementService, patService, scriptExecutionService, scriptManagementService, kafkaMappingService);
     }
 }

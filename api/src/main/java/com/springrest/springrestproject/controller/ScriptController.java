@@ -1,5 +1,6 @@
 package com.springrest.springrestproject.controller;
 
+import com.springrest.scripting.model.CallerOrigin;
 import com.springrest.scripting.model.ScriptCaller;
 import com.springrest.scripting.engine.ScriptExecutionService;
 import com.springrest.springrestproject.core.response.ApiResponse;
@@ -42,8 +43,8 @@ public class ScriptController {
                     .collect(Collectors.toSet());
         }
 
-        ScriptCaller caller = new ScriptCaller(userId, roles);
-        Object result = scriptExecutionService.execute(script, caller, debugEnabled);
+        ScriptCaller caller = new ScriptCaller(userId, roles, CallerOrigin.USER_SUBMITTED);
+        Object result = scriptExecutionService.executeAdhoc(script, caller, debugEnabled);
         return ApiResponse.success(result);
     }
 }

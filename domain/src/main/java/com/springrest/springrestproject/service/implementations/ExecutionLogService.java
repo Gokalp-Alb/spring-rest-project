@@ -25,10 +25,10 @@ public class ExecutionLogService implements IExecutionLogService {
 
     @Override
     @Transactional
-    public ExecutionLog logStart(String executionId, String script, String caller) {
+    public ExecutionLog logStart(String executionId, Long scriptId, String caller) {
         ExecutionLog log = ExecutionLog.builder()
                 .executionId(executionId)
-                .script(script)
+                .scriptId(scriptId)
                 .caller(caller)
                 .status(ExecutionStatus.RUNNING)
                 .createdAt(LocalDateTime.now())
@@ -43,7 +43,7 @@ public class ExecutionLogService implements IExecutionLogService {
         ExecutionLog updated = ExecutionLog.builder()
                 .id(log.id())
                 .executionId(log.executionId())
-                .script(log.script())
+                .scriptId(log.scriptId())
                 .caller(log.caller())
                 .status(ExecutionStatus.SUCCESS)
                 .output(output)
@@ -68,7 +68,7 @@ public class ExecutionLogService implements IExecutionLogService {
         ExecutionLog updated = ExecutionLog.builder()
                 .id(log.id())
                 .executionId(log.executionId())
-                .script(log.script())
+                .scriptId(log.scriptId())
                 .caller(log.caller())
                 .status(status)
                 .output(log.output())

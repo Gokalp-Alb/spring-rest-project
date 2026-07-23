@@ -1,6 +1,7 @@
 package com.springrest.springrestproject.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springrest.springrestproject.SpringRestProjectApplication;
 import com.springrest.springrestproject.config.SecurityConfig;
 import com.springrest.springrestproject.core.mapper.TableMapper;
 import com.springrest.springrestproject.dto.request.table.TableCreateRequest;
@@ -21,6 +22,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -47,7 +49,12 @@ class TableControllerTestConfig implements WebMvcConfigurer {
     }
 }
 
+// classes = SpringRestProjectApplication.class is required here: domain's test-jar (pulled in
+// for DataServiceHookIntegrationTest) also puts DomainTestApplication (itself
+// @SpringBootApplication-annotated) on the test classpath, so an unqualified @WebMvcTest scan
+// finds two @SpringBootConfiguration classes and fails to boot.
 @WebMvcTest(TableController.class)
+@ContextConfiguration(classes = SpringRestProjectApplication.class)
 @Import({TableControllerTestConfig.class, SecurityConfig.class})
 class TableControllerDatabaseAdminTest {
 

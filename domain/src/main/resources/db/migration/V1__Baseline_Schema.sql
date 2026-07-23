@@ -77,11 +77,21 @@ CREATE TABLE sys_ddl_log (
                                 is_restricted BOOLEAN DEFAULT FALSE
 );
 
+CREATE TABLE sys_kafka_topics (
+    id                BIGSERIAL PRIMARY KEY,
+    topic_name        VARCHAR(255) NOT NULL UNIQUE,
+    creator_id        BIGINT,
+    created_date      TIMESTAMP,
+    last_updater_id   BIGINT,
+    last_changed_date TIMESTAMP,
+    is_restricted     BOOLEAN DEFAULT TRUE
+);
+
 CREATE TABLE sys_kafka_table_mappings (
                                       id BIGSERIAL PRIMARY KEY,
                                       active BOOLEAN DEFAULT TRUE,
                                       direction VARCHAR(50),
-                                      kafka_topic VARCHAR(255) NOT NULL,
+                                      topic_id BIGINT NOT NULL REFERENCES sys_kafka_topics(id),
                                       table_name VARCHAR(255) NOT NULL,
                                       creator_id BIGINT,
                                       created_date TIMESTAMP,
@@ -140,7 +150,7 @@ CREATE TABLE sys_kafka_table_mappings_log (
     id BIGINT,
     active BOOLEAN,
     direction VARCHAR(50),
-    kafka_topic VARCHAR(255),
+    topic_id BIGINT,
     table_name VARCHAR(255),
     operation_type VARCHAR(50),
     executed_at TIMESTAMP,
@@ -225,7 +235,7 @@ SELECT setval('sys_app_users_id_seq', (SELECT MAX(id) FROM sys_app_users));
 CREATE TABLE sys_execution_logs (
     id BIGSERIAL PRIMARY KEY,
     execution_id VARCHAR(255) NOT NULL UNIQUE,
-    script TEXT NOT NULL,
+    script_id BIGINT,
     caller VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL,
     output TEXT,
@@ -254,6 +264,42 @@ CREATE TABLE sys_execution_log_entries (
     last_changed_date TIMESTAMP,
     is_restricted BOOLEAN DEFAULT FALSE
 );
+
+CREATE TABLE sys_scripts (
+    id                BIGSERIAL PRIMARY KEY,
+    script_type       VARCHAR(16) NOT NULL CHECK (script_type IN ('DB', 'KAFKA')),
+    table_id          BIGINT REFERENCES sys_table_metadata(id),
+    topic_id          BIGINT REFERENCES sys_kafka_topics(id),
+    script_body       TEXT NOT NULL,
+    creator_id        BIGINT,
+    created_date      TIMESTAMP,
+    last_updater_id   BIGINT,
+    last_changed_date TIMESTAMP,
+    is_restricted     BOOLEAN DEFAULT TRUE,
+    CONSTRAINT sys_scripts_type_target_chk CHECK (
+        (script_type = 'DB'    AND table_id IS NOT NULL AND topic_id IS NULL) OR
+        (script_type = 'KAFKA' AND topic_id IS NOT NULL AND table_id IS NULL)
+    )
+);
+
+CREATE UNIQUE INDEX sys_scripts_one_per_table ON sys_scripts (table_id) WHERE script_type = 'DB';
+CREATE UNIQUE INDEX sys_scripts_one_per_topic ON sys_scripts (topic_id) WHERE script_type = 'KAFKA';
+
+CREATE TABLE sys_scripts_log (
+    log_id BIGSERIAL PRIMARY KEY,
+    id BIGINT,
+    script_type VARCHAR(16),
+    table_id BIGINT,
+    topic_id BIGINT,
+    script_body TEXT,
+    operation_type VARCHAR(50),
+    executed_at TIMESTAMP,
+    user_id BIGINT
+);
+
+ALTER TABLE sys_execution_logs
+    ADD CONSTRAINT sys_execution_logs_script_id_fkey
+    FOREIGN KEY (script_id) REFERENCES sys_scripts(id) ON DELETE SET NULL;
 
 -- USER GROUPS (many-to-many)
 
@@ -315,8 +361,7 @@ VALUES ('MANY_TO_ONE', 'sys_execution_log_entries', 'execution_id', 'sys_executi
 
 -- SYSTEM METADATA REGISTRY
 -- Registers every system-managed table (and its columns) into sys_table_metadata / sys_column_metadata,
--- including this pair registering themselves. Uses information_schema rather than hand-listing every
--- column, since the alternative is hundreds of near-identical literal INSERT statements.
+-- including this pair registering themselves.
 -- Excluded per spec: flyway_schema_history, sys_personal_access_tokens, spring_session, spring_session_attributes.
 -- is_audit_enabled is set for base tables that have a corresponding _log table; the _log tables
 -- themselves (and tables with no log counterpart) are not audit-enabled.
@@ -330,9 +375,11 @@ DECLARE
         'sys_table_metadata', 'sys_table_metadata_log',
         'sys_column_metadata', 'sys_column_metadata_log',
         'sys_ddl_log',
+        'sys_kafka_topics',
         'sys_kafka_table_mappings', 'sys_kafka_table_mappings_log',
         'sys_relation_metadata', 'sys_relation_metadata_log',
         'sys_execution_logs', 'sys_execution_log_entries',
+        'sys_scripts', 'sys_scripts_log',
         'sys_user_groups', 'sys_user_groups_log', 'sys_app_users_sys_user_groups_jt'
     ];
     audited_tables TEXT[] := ARRAY[
@@ -341,7 +388,8 @@ DECLARE
         'sys_column_metadata',
         'sys_kafka_table_mappings',
         'sys_relation_metadata',
-        'sys_user_groups'
+        'sys_user_groups',
+        'sys_scripts'
     ];
     tbl TEXT;
     new_table_id BIGINT;
@@ -394,3 +442,5 @@ GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO mcp_agent;
 
 GRANT SELECT, INSERT, UPDATE ON sys_execution_logs TO mcp_agent;
 GRANT SELECT, INSERT, UPDATE ON sys_execution_log_entries TO mcp_agent;
+GRANT INSERT, UPDATE, DELETE ON sys_kafka_topics TO mcp_agent;
+GRANT INSERT, UPDATE, DELETE ON sys_scripts, sys_scripts_log TO mcp_agent;

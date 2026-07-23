@@ -4,6 +4,8 @@ import com.springrest.springrestproject.core.exception.ApplicationException;
 import com.springrest.springrestproject.core.exception.ErrorCode;
 import com.springrest.springrestproject.core.exception.FieldValidationError;
 import com.springrest.springrestproject.core.governance.SystemGovernanceGuard;
+import com.springrest.springrestproject.core.hooks.ScriptHookInvoker;
+import com.springrest.springrestproject.core.hooks.ScriptHookSession;
 import com.springrest.springrestproject.dto.request.data.TableInsertRequest;
 import com.springrest.springrestproject.dto.request.query.ALLOWED_OPERATORS;
 import com.springrest.springrestproject.dto.request.query.QueryRequest;
@@ -24,7 +26,7 @@ import com.springrest.springrestproject.service.interfaces.IMetadataService;
 import com.springrest.springrestproject.service.interfaces.IRelationService;
 import com.springrest.springrestproject.util.DataEvaluationHelper;
 import com.springrest.springrestproject.validators.SqlIdentifierValidator;
-import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -45,7 +47,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class DataService implements IDataService {
 
     private final JdbcTemplate jdbcTemplate;
@@ -57,6 +58,36 @@ public class DataService implements IDataService {
     private final OutboundKafkaPublisher kafkaPublisher;
     private final SqlIdentifierValidator sqlIdentifierValidator;
     private final SystemGovernanceGuard governanceGuard;
+    private final ScriptHookInvoker hookInvoker;
+
+    // Explicit constructor (rather than Lombok's @RequiredArgsConstructor) so that @Lazy can be
+    // placed directly on the hookInvoker parameter. @Lazy breaks a genuine circular bean
+    // dependency: DataService -> ScriptHookInvoker (ScriptHookInvokerImpl, from the scripting
+    // module) -> IDataService (used by its TablesProxy to let scripts read/write table data) ->
+    // DataService again. Spring cannot satisfy that cycle via constructor injection without one
+    // side being a lazy proxy, and relying on Lombok to copy the annotation onto the generated
+    // constructor parameter is not guaranteed.
+    public DataService(JdbcTemplate jdbcTemplate,
+                        TableMetadataRepo tableMetadataRepo,
+                        AppUserRepo userRepo,
+                        IMetadataService metadataService,
+                        IRelationService relationService,
+                        DataEvaluationHelper dataHelper,
+                        OutboundKafkaPublisher kafkaPublisher,
+                        SqlIdentifierValidator sqlIdentifierValidator,
+                        SystemGovernanceGuard governanceGuard,
+                        @Lazy ScriptHookInvoker hookInvoker) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.tableMetadataRepo = tableMetadataRepo;
+        this.userRepo = userRepo;
+        this.metadataService = metadataService;
+        this.relationService = relationService;
+        this.dataHelper = dataHelper;
+        this.kafkaPublisher = kafkaPublisher;
+        this.sqlIdentifierValidator = sqlIdentifierValidator;
+        this.governanceGuard = governanceGuard;
+        this.hookInvoker = hookInvoker;
+    }
 
     @Override
     @Transactional
@@ -81,118 +112,129 @@ public class DataService implements IDataService {
         dataHelper.validateRowRegex(metadata, request.rowData());
         dataHelper.validateRowDates(metadata, request.rowData());
 
-        Map<String, Object> finalRowData = request.rowData() != null ? new HashMap<>(request.rowData()) : new HashMap<>();
-        
-        @SuppressWarnings("unchecked")
-        Map<String, List<Map<String, Object>>> relations = (Map<String, List<Map<String, Object>>>) finalRowData.remove("relations");
-        
-        if (relations != null && !relations.isEmpty()) {
-            List<ResolvedRelation> tableRelations = relationService.getRelationsForTable(request.tableName());
-            for (Map.Entry<String, List<Map<String, Object>>> entry : relations.entrySet()) {
-                String relationName = entry.getKey();
-                List<Map<String, Object>> relatedItems = entry.getValue();
-                
-                ResolvedRelation relation = tableRelations.stream()
-                        .filter(r -> r.relationName().equalsIgnoreCase(relationName))
-                        .findFirst()
-                        .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST, "Relation not found: " + relationName));
-
-                if (relation.type() == RelationJoinType.FORWARD) {
-                    if (relatedItems.size() > 1) {
-                        throw new ApplicationException(ErrorCode.BAD_REQUEST, "Multiple items provided for a Many-to-One or One-to-One relation: " + relationName);
-                    }
-                    Map<String, Object> item = new HashMap<>(relatedItems.getFirst());
-                    Object relatedId = item.get("id");
-                    if (relatedId != null) {
-                        finalRowData.put(relation.baseColumn(), Long.valueOf(relatedId.toString()));
-                    } else {
-                        TableInsertRequest nestedRequest = new TableInsertRequest(relation.targetTable(), item);
-                        DataResponse nestedResponse = insertRow(nestedRequest, userId);
-                        finalRowData.put(relation.baseColumn(), nestedResponse.id());
-                    }
-                }
+        try (ScriptHookSession dbHookSession =
+                     hookInvoker.openDbHookSession(metadata.id(), userId).orElse(null)) {
+            if (dbHookSession != null) {
+                dbHookSession.invokeIfDefined("beforeSaveToDB");
             }
-        }
 
-        SystemColumn sysCols = SystemColumn.defaults();
-        finalRowData.put(sysCols.creatorId().name(), userId);
-        finalRowData.put(sysCols.createdDate().name(), LocalDateTime.now());
-        finalRowData.put(sysCols.lastUpdaterId().name(), userId);
-        finalRowData.put(sysCols.lastChangedDate().name(), LocalDateTime.now());
+            Map<String, Object> finalRowData = request.rowData() != null ? new HashMap<>(request.rowData()) : new HashMap<>();
 
-        List<String> columns = new ArrayList<>(finalRowData.keySet());
-        List<Object> values = new ArrayList<>(finalRowData.values());
+            @SuppressWarnings("unchecked")
+            Map<String, List<Map<String, Object>>> relations = (Map<String, List<Map<String, Object>>>) finalRowData.remove("relations");
 
-        String columnsSql = String.join(", ", columns);
+            if (relations != null && !relations.isEmpty()) {
+                List<ResolvedRelation> tableRelations = relationService.getRelationsForTable(request.tableName());
+                for (Map.Entry<String, List<Map<String, Object>>> entry : relations.entrySet()) {
+                    String relationName = entry.getKey();
+                    List<Map<String, Object>> relatedItems = entry.getValue();
 
-        String placeholdersSql = columns.stream()
-                .map(col -> "?")
-                .collect(Collectors.joining(", "));
+                    ResolvedRelation relation = tableRelations.stream()
+                            .filter(r -> r.relationName().equalsIgnoreCase(relationName))
+                            .findFirst()
+                            .orElseThrow(() -> new ApplicationException(ErrorCode.BAD_REQUEST, "Relation not found: " + relationName));
 
-        String insertSql = String.format("INSERT INTO %s (%s) VALUES (%s) RETURNING id;",
-                request.tableName(), columnsSql, placeholdersSql);
-
-        String logSql = dataHelper.rebuildFullSql(insertSql, values);
-
-        metadataService.logSchemaChange(request.tableName(), logSql, userId);
-        Long id;
-        try {
-            id = jdbcTemplate.queryForObject(insertSql, Long.class, values.toArray());
-        } catch (DataIntegrityViolationException e) {
-            handleDataIntegrityViolation(e);
-            throw e;
-        }
-
-        if (id == null) {
-            throw new ApplicationException(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to insert row or retrieve generated ID.");
-        }
-
-        if (relations != null && !relations.isEmpty()) {
-            List<ResolvedRelation> tableRelations = relationService.getRelationsForTable(request.tableName());
-            for (Map.Entry<String, List<Map<String, Object>>> entry : relations.entrySet()) {
-                String relationName = entry.getKey();
-                List<Map<String, Object>> relatedItems = entry.getValue();
-                
-                ResolvedRelation relation = tableRelations.stream()
-                        .filter(r -> r.relationName().equalsIgnoreCase(relationName))
-                        .findFirst()
-                        .orElse(null);
-
-                if (relation != null && relation.type() == RelationJoinType.REVERSE) {
-                    for (Map<String, Object> item : relatedItems) {
-                        Map<String, Object> itemData = new HashMap<>(item);
-                        Object relatedId = itemData.get("id");
-                        
+                    if (relation.type() == RelationJoinType.FORWARD) {
+                        if (relatedItems.size() > 1) {
+                            throw new ApplicationException(ErrorCode.BAD_REQUEST, "Multiple items provided for a Many-to-One or One-to-One relation: " + relationName);
+                        }
+                        Map<String, Object> item = new HashMap<>(relatedItems.getFirst());
+                        Object relatedId = item.get("id");
                         if (relatedId != null) {
-                            updateRowById(relation.targetTable(), Long.valueOf(relatedId.toString()), Map.of(relation.targetColumn(), id), userId);
+                            finalRowData.put(relation.baseColumn(), Long.valueOf(relatedId.toString()));
                         } else {
-                            itemData.put(relation.targetColumn(), id);
-                            
-                            TableInsertRequest nestedRequest = new TableInsertRequest(relation.targetTable(), itemData);
-                            insertRow(nestedRequest, userId);
+                            TableInsertRequest nestedRequest = new TableInsertRequest(relation.targetTable(), item);
+                            DataResponse nestedResponse = insertRow(nestedRequest, userId);
+                            finalRowData.put(relation.baseColumn(), nestedResponse.id());
                         }
                     }
                 }
             }
+
+            SystemColumn sysCols = SystemColumn.defaults();
+            finalRowData.put(sysCols.creatorId().name(), userId);
+            finalRowData.put(sysCols.createdDate().name(), LocalDateTime.now());
+            finalRowData.put(sysCols.lastUpdaterId().name(), userId);
+            finalRowData.put(sysCols.lastChangedDate().name(), LocalDateTime.now());
+
+            List<String> columns = new ArrayList<>(finalRowData.keySet());
+            List<Object> values = new ArrayList<>(finalRowData.values());
+
+            String columnsSql = String.join(", ", columns);
+
+            String placeholdersSql = columns.stream()
+                    .map(col -> "?")
+                    .collect(Collectors.joining(", "));
+
+            String insertSql = String.format("INSERT INTO %s (%s) VALUES (%s) RETURNING id;",
+                    request.tableName(), columnsSql, placeholdersSql);
+
+            String logSql = dataHelper.rebuildFullSql(insertSql, values);
+
+            metadataService.logSchemaChange(request.tableName(), logSql, userId);
+            Long id;
+            try {
+                id = jdbcTemplate.queryForObject(insertSql, Long.class, values.toArray());
+            } catch (DataIntegrityViolationException e) {
+                handleDataIntegrityViolation(e);
+                throw e;
+            }
+
+            if (id == null) {
+                throw new ApplicationException(ErrorCode.INTERNAL_SERVER_ERROR, "Failed to insert row or retrieve generated ID.");
+            }
+
+            if (dbHookSession != null) {
+                dbHookSession.invokeIfDefined("afterSaveToDB");
+            }
+
+            if (relations != null && !relations.isEmpty()) {
+                List<ResolvedRelation> tableRelations = relationService.getRelationsForTable(request.tableName());
+                for (Map.Entry<String, List<Map<String, Object>>> entry : relations.entrySet()) {
+                    String relationName = entry.getKey();
+                    List<Map<String, Object>> relatedItems = entry.getValue();
+
+                    ResolvedRelation relation = tableRelations.stream()
+                            .filter(r -> r.relationName().equalsIgnoreCase(relationName))
+                            .findFirst()
+                            .orElse(null);
+
+                    if (relation != null && relation.type() == RelationJoinType.REVERSE) {
+                        for (Map<String, Object> item : relatedItems) {
+                            Map<String, Object> itemData = new HashMap<>(item);
+                            Object relatedId = itemData.get("id");
+
+                            if (relatedId != null) {
+                                updateRowById(relation.targetTable(), Long.valueOf(relatedId.toString()), Map.of(relation.targetColumn(), id), userId);
+                            } else {
+                                itemData.put(relation.targetColumn(), id);
+
+                                TableInsertRequest nestedRequest = new TableInsertRequest(relation.targetTable(), itemData);
+                                insertRow(nestedRequest, userId);
+                            }
+                        }
+                    }
+                }
+            }
+
+            kafkaPublisher.publishMutation(request.tableName(), "INSERT", finalRowData, userId);
+
+            auditLogMutation(AuditRequest.builder()
+                    .tableMetadata(metadata)
+                    .recordId(id)
+                    .rowData(finalRowData)
+                    .operationType("POST")
+                    .executedAt(java.time.LocalDateTime.now())
+                    .userId(userId)
+                    .build());
+
+            return new DataResponse(
+                    id,
+                    request.tableName(),
+                    "INSERT",
+                    finalRowData
+            );
         }
-
-        kafkaPublisher.publishMutation(request.tableName(), "INSERT", finalRowData, userId);
-
-        auditLogMutation(AuditRequest.builder()
-                .tableMetadata(metadata)
-                .recordId(id)
-                .rowData(finalRowData)
-                .operationType("POST")
-                .executedAt(java.time.LocalDateTime.now())
-                .userId(userId)
-                .build());
-
-        return new DataResponse(
-                id,
-                request.tableName(),
-                "INSERT",
-                finalRowData
-        );
     }
 
     private void validateQueryRequest(QueryRequest request, boolean isRoot) {
@@ -658,62 +700,75 @@ public class DataService implements IDataService {
         dataHelper.validateRowRegex(metadata, updateData);
         dataHelper.validateRowDates(metadata, updateData);
 
-        Map<String, Object> finalUpdateData = new HashMap<>(updateData);
-        SystemColumn sysCols = SystemColumn.defaults();
-        finalUpdateData.remove(sysCols.creatorId().name());
-        finalUpdateData.remove(sysCols.createdDate().name());
-        finalUpdateData.put(sysCols.lastUpdaterId().name(), userId);
-        finalUpdateData.put(sysCols.lastChangedDate().name(), LocalDateTime.now());
-
-        List<String> sets = new ArrayList<>();
-        List<Object> values = new ArrayList<>();
-        for (Map.Entry<String, Object> entry : finalUpdateData.entrySet()) {
-            if (!entry.getKey().equalsIgnoreCase("id")) {
-                sets.add(entry.getKey() + " = ?");
-                values.add(entry.getValue());
+        try (ScriptHookSession dbHookSession =
+                     hookInvoker.openDbHookSession(metadata.id(), userId).orElse(null)) {
+            if (dbHookSession != null) {
+                dbHookSession.invokeIfDefined("beforeSaveToDB");
             }
-        }
-        String setSql = String.join(", ", sets);
-        String updateSql = String.format("UPDATE %s SET %s WHERE id = ?;", tableName, setSql);
-        values.add(id);
 
-        String fullSqlForLog = dataHelper.rebuildFullSql(updateSql, values);
-        metadataService.logSchemaChange(tableName, fullSqlForLog, userId);
+            Map<String, Object> finalUpdateData = new HashMap<>(updateData);
+            SystemColumn sysCols = SystemColumn.defaults();
+            finalUpdateData.remove(sysCols.creatorId().name());
+            finalUpdateData.remove(sysCols.createdDate().name());
+            finalUpdateData.put(sysCols.lastUpdaterId().name(), userId);
+            finalUpdateData.put(sysCols.lastChangedDate().name(), LocalDateTime.now());
 
-        int rowsAffected;
-        try {
-            rowsAffected = jdbcTemplate.update(updateSql, values.toArray());
-        } catch (DataIntegrityViolationException e) {
-            handleDataIntegrityViolation(e);
-            throw e;
-        }
-        Map<String, Object> fullPayload = new HashMap<>(finalUpdateData);
-        fullPayload.put("id", id);
-        kafkaPublisher.publishMutation(tableName, "UPDATE", fullPayload, userId);
-
-        if (rowsAffected == 0) {
-            throw new ApplicationException(ErrorCode.ROW_NOT_FOUND, id, tableName);
-        }
-        if (metadata.isAuditEnabled() != null && metadata.isAuditEnabled()) {
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(String.format("SELECT * FROM %s WHERE id = ?;", tableName), id);
-            if (!rows.isEmpty()) {
-                auditLogMutation(AuditRequest.builder()
-                        .tableMetadata(metadata)
-                        .recordId(id)
-                        .rowData(rows.getFirst())
-                        .operationType("PUT")
-                        .executedAt(LocalDateTime.now())
-                        .userId(userId)
-                        .build());
+            List<String> sets = new ArrayList<>();
+            List<Object> values = new ArrayList<>();
+            for (Map.Entry<String, Object> entry : finalUpdateData.entrySet()) {
+                if (!entry.getKey().equalsIgnoreCase("id")) {
+                    sets.add(entry.getKey() + " = ?");
+                    values.add(entry.getValue());
+                }
             }
-        }
+            String setSql = String.join(", ", sets);
+            String updateSql = String.format("UPDATE %s SET %s WHERE id = ?;", tableName, setSql);
+            values.add(id);
 
-        return new DataResponse(
-                id,
-                tableName,
-                "UPDATE",
-                finalUpdateData
-        );
+            String fullSqlForLog = dataHelper.rebuildFullSql(updateSql, values);
+            metadataService.logSchemaChange(tableName, fullSqlForLog, userId);
+
+            int rowsAffected;
+            try {
+                rowsAffected = jdbcTemplate.update(updateSql, values.toArray());
+            } catch (DataIntegrityViolationException e) {
+                handleDataIntegrityViolation(e);
+                throw e;
+            }
+
+            Map<String, Object> fullPayload = new HashMap<>(finalUpdateData);
+            fullPayload.put("id", id);
+
+            if (dbHookSession != null) {
+                dbHookSession.invokeIfDefined("afterSaveToDB");
+            }
+
+            kafkaPublisher.publishMutation(tableName, "UPDATE", fullPayload, userId);
+
+            if (rowsAffected == 0) {
+                throw new ApplicationException(ErrorCode.ROW_NOT_FOUND, id, tableName);
+            }
+            if (metadata.isAuditEnabled() != null && metadata.isAuditEnabled()) {
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(String.format("SELECT * FROM %s WHERE id = ?;", tableName), id);
+                if (!rows.isEmpty()) {
+                    auditLogMutation(AuditRequest.builder()
+                            .tableMetadata(metadata)
+                            .recordId(id)
+                            .rowData(rows.getFirst())
+                            .operationType("PUT")
+                            .executedAt(LocalDateTime.now())
+                            .userId(userId)
+                            .build());
+                }
+            }
+
+            return new DataResponse(
+                    id,
+                    tableName,
+                    "UPDATE",
+                    finalUpdateData
+            );
+        }
     }
 
     private TableMetadata logAndRestrictedCheck(String tableName, Long id) {

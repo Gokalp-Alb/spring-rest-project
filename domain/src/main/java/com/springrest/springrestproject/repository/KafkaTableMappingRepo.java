@@ -4,6 +4,7 @@ import com.springrest.springrestproject.core.governance.SystemGovernanceGuard;
 import com.springrest.springrestproject.model.KafkaTableMapping;
 import lombok.RequiredArgsConstructor;
 import org.jooq.DSLContext;
+import org.jooq.Record;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -23,36 +24,42 @@ public class KafkaTableMappingRepo {
         return dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
                 .where(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION.eq(direction))
                 .and(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE.eq(true))
-                .fetchInto(KafkaTableMapping.class);
+                .fetch(this::toKafkaTableMapping);
     }
 
     public Optional<KafkaTableMapping> findByTableNameAndDirectionAndActiveTrue(String tableName, String direction) {
-        return Optional.ofNullable(
-                dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
-                        .where(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME.eq(tableName))
-                        .and(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION.eq(direction))
-                        .and(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE.eq(true))
-                        .fetchOneInto(KafkaTableMapping.class)
-        );
+        return dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
+                .where(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME.eq(tableName))
+                .and(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION.eq(direction))
+                .and(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE.eq(true))
+                .fetchOptional(this::toKafkaTableMapping);
     }
 
     public Optional<KafkaTableMapping> findById(Long id) {
-        return Optional.ofNullable(
-                dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
-                        .where(SYS_KAFKA_TABLE_MAPPINGS.ID.eq(id))
-                        .fetchOneInto(KafkaTableMapping.class)
-        );
+        return dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS)
+                .where(SYS_KAFKA_TABLE_MAPPINGS.ID.eq(id))
+                .fetchOptional(this::toKafkaTableMapping);
     }
 
     public List<KafkaTableMapping> findAll() {
-        return dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS).fetchInto(KafkaTableMapping.class);
+        return dsl.selectFrom(SYS_KAFKA_TABLE_MAPPINGS).fetch(this::toKafkaTableMapping);
+    }
+
+    private KafkaTableMapping toKafkaTableMapping(Record record) {
+        return KafkaTableMapping.builder()
+                .id(record.get(SYS_KAFKA_TABLE_MAPPINGS.ID))
+                .tableName(record.get(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME))
+                .topicId(record.get(SYS_KAFKA_TABLE_MAPPINGS.TOPIC_ID))
+                .direction(record.get(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION))
+                .active(Boolean.TRUE.equals(record.get(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE)))
+                .build();
     }
 
     public KafkaTableMapping save(KafkaTableMapping mapping) {
         if (mapping.id() == null) {
             Long generatedId = Objects.requireNonNull(dsl.insertInto(SYS_KAFKA_TABLE_MAPPINGS)
                             .set(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
-                            .set(SYS_KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
+                            .set(SYS_KAFKA_TABLE_MAPPINGS.TOPIC_ID, mapping.topicId())
                             .set(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
                             .set(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
                             .returning(SYS_KAFKA_TABLE_MAPPINGS.ID)
@@ -61,7 +68,7 @@ public class KafkaTableMappingRepo {
             KafkaTableMapping savedMapping = KafkaTableMapping.builder()
                     .id(generatedId)
                     .tableName(mapping.tableName())
-                    .kafkaTopic(mapping.kafkaTopic())
+                    .topicId(mapping.topicId())
                     .direction(mapping.direction())
                     .active(mapping.active())
                     .build();
@@ -74,7 +81,7 @@ public class KafkaTableMappingRepo {
             governanceGuard.assertRowMutable(Boolean.TRUE.equals(currentRestricted));
             dsl.update(SYS_KAFKA_TABLE_MAPPINGS)
                     .set(SYS_KAFKA_TABLE_MAPPINGS.TABLE_NAME, mapping.tableName())
-                    .set(SYS_KAFKA_TABLE_MAPPINGS.KAFKA_TOPIC, mapping.kafkaTopic())
+                    .set(SYS_KAFKA_TABLE_MAPPINGS.TOPIC_ID, mapping.topicId())
                     .set(SYS_KAFKA_TABLE_MAPPINGS.DIRECTION, mapping.direction())
                     .set(SYS_KAFKA_TABLE_MAPPINGS.ACTIVE, mapping.active())
                     .where(SYS_KAFKA_TABLE_MAPPINGS.ID.eq(mapping.id()))
@@ -93,7 +100,7 @@ public class KafkaTableMappingRepo {
                 .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.ID, mapping.id())
                 .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.ACTIVE, mapping.active())
                 .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.DIRECTION, mapping.direction())
-                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.KAFKA_TOPIC, mapping.kafkaTopic())
+                .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.TOPIC_ID, mapping.topicId())
                 .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.TABLE_NAME, mapping.tableName())
                 .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.OPERATION_TYPE, operation)
                 .set(SYS_KAFKA_TABLE_MAPPINGS_LOG.EXECUTED_AT, java.time.LocalDateTime.now())
